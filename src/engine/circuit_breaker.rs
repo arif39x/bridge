@@ -1,4 +1,4 @@
-use crate::error::{BridgeOrmError, DiagnosticInfo};
+use crate::error::{BridgeError, DiagnosticInfo};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -34,10 +34,10 @@ impl CircuitBreaker {
         }
     }
 
-    pub async fn call<F, Fut, R>(&self, f: F) -> Result<R, BridgeOrmError>
+    pub async fn call<F, Fut, R>(&self, f: F) -> Result<R, BridgeError>
     where
         F: FnOnce() -> Fut,
-        Fut: std::future::Future<Output = Result<R, BridgeOrmError>>,
+        Fut: std::future::Future<Output = Result<R, BridgeError>>,
     {
         self.before_call()?;
         let result = f().await;
@@ -45,7 +45,7 @@ impl CircuitBreaker {
         result
     }
 
-    fn before_call(&self) -> Result<(), BridgeOrmError> {
+    fn before_call(&self) -> Result<(), BridgeError> {
         let mut state = self.state.lock().unwrap();
         match state.current_state {
             State::Closed => Ok(()),
@@ -56,7 +56,7 @@ impl CircuitBreaker {
                         return Ok(());
                     }
                 }
-                Err(BridgeOrmError::Internal(
+                Err(BridgeError::Internal(
                     "Circuit breaker is OPEN. Database calls are temporarily blocked to allow recovery.".to_string(),
                     DiagnosticInfo::default(),
                 ))
@@ -65,7 +65,7 @@ impl CircuitBreaker {
         }
     }
 
-    fn after_call<R>(&self, result: &Result<R, BridgeOrmError>) {
+    fn after_call<R>(&self, result: &Result<R, BridgeError>) {
         let mut state = self.state.lock().unwrap();
         match result {
             Ok(_) => {
@@ -74,7 +74,7 @@ impl CircuitBreaker {
                 state.last_failure_time = None;
             }
             Err(e) => match e {
-                BridgeOrmError::Database(_, _) | BridgeOrmError::Internal(_, _) => {
+                BridgeError::Database(_, _) | BridgeError::Internal(_, _) => {
                     state.failures += 1;
                     state.last_failure_time = Some(Instant::now());
                     if state.failures >= self.max_failures {

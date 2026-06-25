@@ -1,5 +1,5 @@
 use crate::engine::db::SqlDialect;
-use crate::error::BridgeOrmResult;
+use crate::error::BridgeResult;
 use serde::{Deserialize, Serialize};
 use sqlx::{AnyPool, Row};
 
@@ -30,7 +30,7 @@ pub struct TableMeta {
 
 /// Reflects the entire schema of the database.
 #[must_use]
-pub async fn reflect_schema(pool: &AnyPool, url: &str) -> BridgeOrmResult<Vec<TableMeta>> {
+pub async fn reflect_schema(pool: &AnyPool, url: &str) -> BridgeResult<Vec<TableMeta>> {
     let dialect = SqlDialect::from_url(url);
 
     // Get list of tables
@@ -80,7 +80,7 @@ pub async fn reflect_table(
     pool: &AnyPool,
     url: &str,
     table_name: &str,
-) -> BridgeOrmResult<Vec<ColumnMeta>> {
+) -> BridgeResult<Vec<ColumnMeta>> {
     let dialect = SqlDialect::from_url(url);
 
     match dialect {
@@ -94,7 +94,7 @@ pub async fn reflect_table(
 async fn reflect_information_schema(
     pool: &AnyPool,
     table_name: &str,
-) -> BridgeOrmResult<Vec<ColumnMeta>> {
+) -> BridgeResult<Vec<ColumnMeta>> {
     let rows = sqlx::query(
         "SELECT column_name, data_type, is_nullable, column_default
          FROM information_schema.columns
@@ -119,7 +119,7 @@ async fn reflect_information_schema(
 
 /// Specialized introspection for SQLite.
 #[must_use]
-async fn reflect_sqlite(pool: &AnyPool, table_name: &str) -> BridgeOrmResult<Vec<ColumnMeta>> {
+async fn reflect_sqlite(pool: &AnyPool, table_name: &str) -> BridgeResult<Vec<ColumnMeta>> {
     let sql = format!("PRAGMA table_info({})", table_name);
     let rows = sqlx::query(&sql).fetch_all(pool).await?;
 

@@ -3,7 +3,7 @@ requires = ["maturin>=1.0,<2.0"]
 build-backend = "maturin"
 
 [project]
-name = "bridge_orm"
+name = "bridge"
 version = "0.1.0"
 description = "Secure By Default"
 requires-python = ">=3.8"
@@ -22,7 +22,7 @@ dev = [
 
 [tool.maturin]
 features = ["pyo3/extension-module"]
-module-name = "bridge_orm_rs"
+module-name = "bridge_rs"
 
 [tool.ruff]
 select = ["E", "F", "B", "ANN"]
@@ -35,4 +35,4 @@ testpaths = ["tests"]
 [tool.mypy]
 strict = true
 ignore_missing_imports = true
-files = ["bridge_orm", "tests"]
+files = ["bridge", "tests"]

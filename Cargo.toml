@@ -1,10 +1,10 @@
 [package]
-name = "bridge_orm"
+name = "bridge"
 version = "0.1.0"
 edition = "2021"
 
 [lib]
-name = "bridge_orm"
+name = "bridge_rs"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]

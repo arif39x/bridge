@@ -1,18 +1,18 @@
 use crate::engine::metadata::ColumnMetadata;
 use crate::engine::query::QueryValue;
-use crate::error::{BridgeOrmError, DiagnosticInfo};
+use crate::error::{BridgeError, DiagnosticInfo};
 use pyo3::prelude::*;
 
 pub fn coerce_py_value(
     py_val: &Bound<'_, PyAny>,
     meta: &ColumnMetadata,
     table_name: &str,
-) -> Result<QueryValue, BridgeOrmError> {
+) -> Result<QueryValue, BridgeError> {
     if py_val.is_none() {
         if meta.is_nullable {
             return Ok(QueryValue::Null);
         }
-        return Err(BridgeOrmError::TypeMismatch {
+        return Err(BridgeError::TypeMismatch {
             field: format!("{}.{}", table_name, meta.name),
             expected: meta.data_type.clone(),
             got: "None".to_string(),
@@ -70,7 +70,7 @@ pub fn coerce_py_value(
             };
             uuid::Uuid::parse_str(&s)
                 .map(QueryValue::Uuid)
-                .map_err(|_| BridgeOrmError::TypeMismatch {
+                .map_err(|_| BridgeError::TypeMismatch {
                     field: format!("{}.{}", table_name, meta.name),
                     expected: "UUID string".to_string(),
                     got: s,
@@ -95,7 +95,7 @@ pub fn coerce_py_value(
         }
         "json" | "jsonb" => {
             let json_module = py.import_bound("json").map_err(|_| {
-                BridgeOrmError::Internal(
+                BridgeError::Internal(
                     "Failed to import json module".to_string(),
                     DiagnosticInfo::default(),
                 )
@@ -143,8 +143,8 @@ pub fn coerce_py_value(
     }
 }
 
-fn type_error(table_name: &str, meta: &ColumnMetadata, got: &str) -> BridgeOrmError {
-    BridgeOrmError::TypeMismatch {
+fn type_error(table_name: &str, meta: &ColumnMetadata, got: &str) -> BridgeError {
+    BridgeError::TypeMismatch {
         field: format!("{}.{}", table_name, meta.name),
         expected: meta.data_type.clone(),
         got: got.to_string(),

@@ -1,6 +1,6 @@
 import pytest
 import asyncio
-from bridge_orm import connect, User, execute_raw
+from bridge import connect, User, execute_raw
 import os
 import uuid
 from datetime import datetime, timezone

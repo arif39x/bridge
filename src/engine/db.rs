@@ -1,5 +1,5 @@
 use crate::engine::query::QueryValue;
-use crate::error::{BridgeOrmError, BridgeOrmResult, DiagnosticInfo};
+use crate::error::{BridgeError, BridgeResult, DiagnosticInfo};
 use crate::telemetry::logger::{self, TelemetryEvent};
 use futures::stream::BoxStream;
 use futures::StreamExt;
@@ -48,6 +48,23 @@ pub trait Dialect: Send + Sync {
     fn get_placeholder(&self, index: usize) -> String;
     fn quote_identifier(&self, identifier: &str) -> String {
         format!("\"{}\"", identifier)
+    }
+    fn build_select_in(
+        &self,
+        table: &str,
+        column: &str,
+        id_count: usize,
+    ) -> (String, Vec<QueryValue>) {
+        let placeholders: Vec<String> = (0..id_count)
+            .map(|i| self.get_placeholder(i))
+            .collect();
+        let sql = format!(
+            "SELECT * FROM {} WHERE {} IN ({})",
+            table,
+            column,
+            placeholders.join(", ")
+        );
+        (sql, Vec::new())
     }
     fn build_select(
         &self,
@@ -245,9 +262,9 @@ impl SqlDialect {
 
 /// Validates that a string is a safe SQL identifier.
 #[must_use]
-pub fn validate_identifier(identifier: &str) -> BridgeOrmResult<()> {
+pub fn validate_identifier(identifier: &str) -> BridgeResult<()> {
     if !VALID_SQL_IDENTIFIER_PATTERN.is_match(identifier) {
-        return Err(BridgeOrmError::Validation(
+        return Err(BridgeError::Validation(
             format!(
                 "Security Violation: Invalid SQL identifier '{}'",
                 identifier
@@ -257,7 +274,7 @@ pub fn validate_identifier(identifier: &str) -> BridgeOrmResult<()> {
     }
 
     if RESERVED_KEYWORDS.contains(&identifier.to_uppercase().as_str()) {
-        return Err(BridgeOrmError::Validation(
+        return Err(BridgeError::Validation(
             format!(
                 "Security Violation: Reserved keyword '{}' used as identifier",
                 identifier
@@ -274,12 +291,12 @@ pub fn validate_identifier(identifier: &str) -> BridgeOrmResult<()> {
 pub async fn connect(
     url: &str,
     config: Option<crate::ffi::pool_config::PoolConfig>,
-) -> BridgeOrmResult<AnyPool> {
+) -> BridgeResult<AnyPool> {
     sqlx::any::install_default_drivers();
 
     let mut options = url
         .parse::<AnyConnectOptions>()
-        .map_err(BridgeOrmError::from)?;
+        .map_err(BridgeError::from)?;
 
     let mut pool_builder = sqlx::any::AnyPoolOptions::new();
 
@@ -300,7 +317,7 @@ pub async fn connect(
     pool_builder
         .connect_with(options)
         .await
-        .map_err(BridgeOrmError::from)
+        .map_err(BridgeError::from)
 }
 
 /// Shared logic for building placeholders and values for queries.
@@ -308,7 +325,7 @@ pub async fn connect(
 fn prepare_statement(
     dialect: &dyn Dialect,
     data: &HashMap<String, QueryValue>,
-) -> BridgeOrmResult<(Vec<String>, Vec<QueryValue>, Vec<String>)> {
+) -> BridgeResult<(Vec<String>, Vec<QueryValue>, Vec<String>)> {
     let mut columns = Vec::new();
     let mut values = Vec::new();
     let mut placeholders = Vec::new();
@@ -351,7 +368,7 @@ pub async fn generic_update(
     table_name: &str,
     data: HashMap<String, QueryValue>,
     filters: HashMap<String, QueryValue>,
-) -> BridgeOrmResult<()> {
+) -> BridgeResult<()> {
     validate_identifier(table_name)?;
     let dialect_type = SqlDialect::from_url(url);
     let dialect = dialect_type.to_dialect();
@@ -424,19 +441,19 @@ pub async fn generic_update(
     if let Some(tx_mutex) = tx {
         let mut tx_guard = tx_mutex.lock().await;
         let tx_conn = tx_guard.as_mut().ok_or_else(|| {
-            BridgeOrmError::Validation(
+            BridgeError::Validation(
                 "Transaction already closed".to_string(),
                 DiagnosticInfo::default(),
             )
         })?;
         query.execute(&mut **tx_conn).await.map_err(|e| {
-            BridgeOrmError::from(e)
+            BridgeError::from(e)
                 .with_sql(sql.clone(), None)
                 .add_breadcrumb("generic_update")
         })?;
     } else {
         query.execute(pool).await.map_err(|e| {
-            BridgeOrmError::from(e)
+            BridgeError::from(e)
                 .with_sql(sql.clone(), None)
                 .add_breadcrumb("generic_update")
         })?;
@@ -454,7 +471,7 @@ pub async fn generic_delete(
     url: &str,
     table_name: &str,
     filters: HashMap<String, QueryValue>,
-) -> BridgeOrmResult<()> {
+) -> BridgeResult<()> {
     validate_identifier(table_name)?;
     let dialect_type = SqlDialect::from_url(url);
     let dialect = dialect_type.to_dialect();
@@ -499,19 +516,19 @@ pub async fn generic_delete(
     if let Some(tx_mutex) = tx {
         let mut tx_guard = tx_mutex.lock().await;
         let tx_conn = tx_guard.as_mut().ok_or_else(|| {
-            BridgeOrmError::Validation(
+            BridgeError::Validation(
                 "Transaction already closed".to_string(),
                 DiagnosticInfo::default(),
             )
         })?;
         query.execute(&mut **tx_conn).await.map_err(|e| {
-            BridgeOrmError::from(e)
+            BridgeError::from(e)
                 .with_sql(sql.clone(), None)
                 .add_breadcrumb("generic_delete")
         })?;
     } else {
         query.execute(pool).await.map_err(|e| {
-            BridgeOrmError::from(e)
+            BridgeError::from(e)
                 .with_sql(sql.clone(), None)
                 .add_breadcrumb("generic_delete")
         })?;
@@ -531,9 +548,9 @@ pub async fn generic_delete(
 /// Pure Rust implementation of execute_raw.
 #[must_use]
 #[tracing::instrument(skip(pool))]
-pub async fn execute_raw(pool: &AnyPool, sql: &str) -> BridgeOrmResult<()> {
+pub async fn execute_raw(pool: &AnyPool, sql: &str) -> BridgeResult<()> {
     sqlx::query(sql).execute(pool).await.map_err(|e| {
-        BridgeOrmError::from(e)
+        BridgeError::from(e)
             .with_sql(sql.to_string(), None)
             .add_breadcrumb("execute_raw")
     })?;
@@ -549,7 +566,7 @@ pub async fn generic_insert(
     url: &str,
     table_name: &str,
     data: HashMap<String, QueryValue>,
-) -> BridgeOrmResult<HashMap<String, QueryValue>> {
+) -> BridgeResult<HashMap<String, QueryValue>> {
     validate_identifier(table_name)?;
     let dialect_type = SqlDialect::from_url(url);
     let dialect = dialect_type.to_dialect();
@@ -594,19 +611,19 @@ pub async fn generic_insert(
     if let Some(tx_mutex) = tx {
         let mut tx_guard = tx_mutex.lock().await;
         let tx_conn = tx_guard.as_mut().ok_or_else(|| {
-            BridgeOrmError::Validation(
+            BridgeError::Validation(
                 "Transaction already closed".to_string(),
                 DiagnosticInfo::default(),
             )
         })?;
         query.execute(&mut **tx_conn).await.map_err(|e| {
-            BridgeOrmError::from(e)
+            BridgeError::from(e)
                 .with_sql(sql.clone(), None)
                 .add_breadcrumb("generic_insert")
         })?;
     } else {
         query.execute(pool).await.map_err(|e| {
-            BridgeOrmError::from(e)
+            BridgeError::from(e)
                 .with_sql(sql.clone(), None)
                 .add_breadcrumb("generic_insert")
         })?;
@@ -632,7 +649,7 @@ pub async fn generic_insert_bulk(
     url: &str,
     table_name: &str,
     items: Vec<HashMap<String, QueryValue>>,
-) -> BridgeOrmResult<Vec<HashMap<String, QueryValue>>> {
+) -> BridgeResult<Vec<HashMap<String, QueryValue>>> {
     validate_identifier(table_name)?;
     let dialect_type = SqlDialect::from_url(url);
     let dialect = dialect_type.to_dialect();
@@ -688,19 +705,19 @@ pub async fn generic_insert_bulk(
     if let Some(tx_mutex) = tx {
         let mut tx_guard = tx_mutex.lock().await;
         let tx_conn = tx_guard.as_mut().ok_or_else(|| {
-            BridgeOrmError::Validation(
+            BridgeError::Validation(
                 "Transaction already closed".to_string(),
                 DiagnosticInfo::default(),
             )
         })?;
         query.execute(&mut **tx_conn).await.map_err(|e| {
-            BridgeOrmError::from(e)
+            BridgeError::from(e)
                 .with_sql(sql.clone(), None)
                 .add_breadcrumb("generic_insert_bulk")
         })?;
     } else {
         query.execute(pool).await.map_err(|e| {
-            BridgeOrmError::from(e)
+            BridgeError::from(e)
                 .with_sql(sql.clone(), None)
                 .add_breadcrumb("generic_insert_bulk")
         })?;
@@ -728,7 +745,7 @@ pub async fn generic_query(
     filters: HashMap<String, QueryValue>,
     limit: Option<i64>,
     fields: Option<Vec<String>>,
-) -> BridgeOrmResult<Vec<AnyRow>> {
+) -> BridgeResult<Vec<AnyRow>> {
     validate_identifier(table_name)?;
     let dialect_type = SqlDialect::from_url(url);
     let dialect = dialect_type.to_dialect();
@@ -756,19 +773,19 @@ pub async fn generic_query(
             let rows = if let Some(tx_mutex) = tx {
                 let mut tx_guard = tx_mutex.lock().await;
                 let tx_conn = tx_guard.as_mut().ok_or_else(|| {
-                    BridgeOrmError::Validation(
+                    BridgeError::Validation(
                         "Transaction already closed".to_string(),
                         DiagnosticInfo::default(),
                     )
                 })?;
                 query.fetch_all(&mut **tx_conn).await.map_err(|e| {
-                    BridgeOrmError::from(e)
+                    BridgeError::from(e)
                         .with_sql(sql.clone(), None)
                         .add_breadcrumb("generic_query")
                 })?
             } else {
                 query.fetch_all(pool).await.map_err(|e| {
-                    BridgeOrmError::from(e)
+                    BridgeError::from(e)
                         .with_sql(sql.clone(), None)
                         .add_breadcrumb("generic_query")
                 })?
@@ -787,6 +804,61 @@ pub async fn generic_query(
         .await
 }
 
+/// Executes SELECT * FROM table WHERE column IN (id1, id2, ...)
+/// with dialect-appropriate placeholders.
+#[must_use]
+#[tracing::instrument(skip(pool, tx))]
+pub async fn generic_select_in(
+    pool: &AnyPool,
+    tx: Option<&Arc<Mutex<Option<sqlx::Transaction<'static, sqlx::Any>>>>>,
+    url: &str,
+    table_name: &str,
+    column: &str,
+    ids: &[String],
+) -> BridgeResult<Vec<AnyRow>> {
+    validate_identifier(table_name)?;
+    validate_identifier(column)?;
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let dialect_type = SqlDialect::from_url(url);
+    let dialect = dialect_type.to_dialect();
+    let (sql, _) = dialect.build_select_in(table_name, column, ids.len());
+    let start = Instant::now();
+    let mut query = sqlx::query(&sql);
+    for id in ids {
+        query = query.bind(id);
+    }
+    let rows = if let Some(tx_mutex) = tx {
+        let mut tx_guard = tx_mutex.lock().await;
+        let tx_conn = tx_guard.as_mut().ok_or_else(|| {
+            BridgeError::Validation(
+                "Transaction already closed".to_string(),
+                DiagnosticInfo::default(),
+            )
+        })?;
+        query.fetch_all(&mut **tx_conn).await.map_err(|e| {
+            BridgeError::from(e)
+                .with_sql(sql.clone(), None)
+                .add_breadcrumb("generic_select_in")
+        })?
+    } else {
+        query.fetch_all(pool).await.map_err(|e| {
+            BridgeError::from(e)
+                .with_sql(sql.clone(), None)
+                .add_breadcrumb("generic_select_in")
+        })?
+    };
+    let duration = start.elapsed();
+    logger::emit_telemetry(TelemetryEvent {
+        sql: sql.clone(),
+        duration_micros: duration.as_micros() as u64,
+        operation: "SELECT_IN".to_string(),
+        table: table_name.to_string(),
+    });
+    Ok(rows)
+}
+
 /// Rust implementation of lazy query.
 #[must_use]
 #[tracing::instrument(skip(pool, tx))]
@@ -798,7 +870,7 @@ pub fn query_lazy(
     filters: HashMap<String, QueryValue>,
     limit: Option<i64>,
     fields: Option<Vec<String>>,
-) -> BridgeOrmResult<BoxStream<'static, BridgeOrmResult<AnyRow>>> {
+) -> BridgeResult<BoxStream<'static, BridgeResult<AnyRow>>> {
     validate_identifier(table_name)?;
     let dialect_type = SqlDialect::from_url(url);
     let dialect = dialect_type.to_dialect();
@@ -818,19 +890,19 @@ pub fn query_lazy(
         if let Some(tx_mutex) = tx {
             let mut tx_guard = tx_mutex.lock().await;
             let tx_conn = tx_guard.as_mut().ok_or_else(|| {
-                BridgeOrmError::Validation(
+                BridgeError::Validation(
                     "Transaction already closed".to_string(),
                     DiagnosticInfo::default(),
                 )
             })?;
             query.fetch_all(&mut **tx_conn).await.map_err(|e| {
-                BridgeOrmError::from(e)
+                BridgeError::from(e)
                     .with_sql(sql.clone(), None)
                     .add_breadcrumb("query_lazy")
             })
         } else {
             query.fetch_all(&pool_clone).await.map_err(|e| {
-                BridgeOrmError::from(e)
+                BridgeError::from(e)
                     .with_sql(sql.clone(), None)
                     .add_breadcrumb("query_lazy")
             })
@@ -847,7 +919,7 @@ pub fn query_lazy(
 
 /// Resolves a Python type name to its corresponding SQL type for a given dialect.
 #[must_use]
-pub fn resolve_python_type_to_sql(py_type: &str, dialect: &str) -> BridgeOrmResult<String> {
+pub fn resolve_python_type_to_sql(py_type: &str, dialect: &str) -> BridgeResult<String> {
     let is_optional = py_type.starts_with("Optional[") || py_type.contains("None");
     let base_type = if is_optional {
         py_type
@@ -886,7 +958,7 @@ pub fn resolve_python_type_to_sql(py_type: &str, dialect: &str) -> BridgeOrmResu
         }
         (t, _) if t.contains("Enum") => "TEXT".to_string(),
         (unknown, _) => {
-            return Err(BridgeOrmError::Validation(
+            return Err(BridgeError::Validation(
                 format!("Unsupported Python type '{}'", unknown),
                 DiagnosticInfo::default(),
             ))

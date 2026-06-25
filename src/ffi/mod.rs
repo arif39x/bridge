@@ -18,7 +18,7 @@ macro_rules! ffi_guard {
 }
 
 use crate::engine;
-use crate::error::{BridgeOrmError, BridgeOrmResult};
+use crate::error::{BridgeError, BridgeResult};
 use crate::schema;
 use crate::telemetry;
 pub mod java;
@@ -40,13 +40,13 @@ use tokio::sync::Mutex;
 static POOL: Lazy<std::sync::RwLock<Option<AnyPool>>> = Lazy::new(|| std::sync::RwLock::new(None));
 static URL: Lazy<std::sync::RwLock<Option<String>>> = Lazy::new(|| std::sync::RwLock::new(None));
 
-/// Converts a `BridgeOrmError` to a `PyErr`.
-fn bridge_error_to_py(err: BridgeOrmError) -> PyErr {
+/// Converts a `BridgeError` to a `PyErr`.
+fn bridge_error_to_py(err: BridgeError) -> PyErr {
     let err_str = err.to_string();
     match err {
-        BridgeOrmError::NotFound(_, _) => PyKeyError::new_err(err_str),
-        BridgeOrmError::Validation(_, _) => PyValueError::new_err(err_str),
-        BridgeOrmError::Database(ref sqlx_err, _) => match sqlx_err {
+        BridgeError::NotFound(_, _) => PyKeyError::new_err(err_str),
+        BridgeError::Validation(_, _) => PyValueError::new_err(err_str),
+        BridgeError::Database(ref sqlx_err, _) => match sqlx_err {
             sqlx::Error::RowNotFound => PyKeyError::new_err("Resource not found"),
             _ => PyRuntimeError::new_err(err_str),
         },
@@ -104,7 +104,7 @@ fn py_to_query_value(
     obj: &Bound<'_, PyAny>,
     table_name: &str,
     column_name: &str,
-) -> BridgeOrmResult<QueryValue> {
+) -> BridgeResult<QueryValue> {
     if obj.is_none() {
         return Ok(QueryValue::Null);
     }
@@ -199,7 +199,7 @@ pub struct ColumnMetaProxy {
 
 #[pyclass]
 pub struct LazyRowStream {
-    pub stream: Arc<Mutex<BoxStream<'static, BridgeOrmResult<AnyRow>>>>,
+    pub stream: Arc<Mutex<BoxStream<'static, BridgeResult<AnyRow>>>>,
     pub table_name: String,
 }
 
@@ -996,6 +996,168 @@ fn fetch_self_ref(
 }
 
 #[pyfunction]
+#[pyo3(signature = (child_table, foreign_key, parent_ids, tx=None))]
+fn batch_fetch_one_to_many<'py>(
+    py: Python<'py>,
+    child_table: String,
+    foreign_key: String,
+    parent_ids: Vec<String>,
+    tx: Option<PyObject>,
+) -> PyResult<Bound<'py, PyAny>> {
+    let pool_guard = POOL.read().unwrap();
+    let pool = pool_guard
+        .as_ref()
+        .ok_or_else(|| PyException::new_err("Connection pool not initialized"))?
+        .clone();
+    let url_guard = URL.read().unwrap();
+    let url = url_guard
+        .as_ref()
+        .ok_or_else(|| PyException::new_err("Connection URL not initialized"))?
+        .clone();
+    let tx_mutex = if let Some(tx_obj) = tx {
+        if let Ok(session) = tx_obj.extract::<engine::session::Session>(py) {
+            Some(session.transaction)
+        } else if let Ok(tx_handle) = tx_obj.extract::<engine::transaction::TxHandle>(py) {
+            Some(tx_handle.inner)
+        } else {
+            return Err(PyValueError::new_err("Invalid transaction or session object"));
+        }
+    } else {
+        None
+    };
+    pyo3_async_runtimes::tokio::future_into_py(py, async move {
+        let grouped = engine::relations::batch_fetch_one_to_many(
+            &pool, tx_mutex.as_ref(), &url, &child_table, &foreign_key, &parent_ids,
+        )
+        .await
+        .map_err(bridge_error_to_py)?;
+        Python::with_gil(|py| {
+            let result_dict = PyDict::new_bound(py);
+            for (parent_id, rows) in grouped {
+                let row_list: Vec<PyObject> = rows
+                    .iter()
+                    .map(|row| {
+                        engine::hydrator::hydrate_row(py, &child_table, row)
+                            .map(|d| d.to_object(py))
+                    })
+                    .collect::<PyResult<Vec<_>>>()?;
+                result_dict.set_item(&parent_id, row_list)?;
+            }
+            Ok(result_dict.to_object(py))
+        })
+    })
+}
+
+#[pyfunction]
+#[pyo3(signature = (target_table, junction_table, left_key, right_key, parent_ids, tx=None))]
+fn batch_fetch_many_to_many<'py>(
+    py: Python<'py>,
+    target_table: String,
+    junction_table: String,
+    left_key: String,
+    right_key: String,
+    parent_ids: Vec<String>,
+    tx: Option<PyObject>,
+) -> PyResult<Bound<'py, PyAny>> {
+    let pool_guard = POOL.read().unwrap();
+    let pool = pool_guard
+        .as_ref()
+        .ok_or_else(|| PyException::new_err("Connection pool not initialized"))?
+        .clone();
+    let url_guard = URL.read().unwrap();
+    let url = url_guard
+        .as_ref()
+        .ok_or_else(|| PyException::new_err("Connection URL not initialized"))?
+        .clone();
+    let tx_mutex = if let Some(tx_obj) = tx {
+        if let Ok(session) = tx_obj.extract::<engine::session::Session>(py) {
+            Some(session.transaction)
+        } else if let Ok(tx_handle) = tx_obj.extract::<engine::transaction::TxHandle>(py) {
+            Some(tx_handle.inner)
+        } else {
+            return Err(PyValueError::new_err("Invalid transaction or session object"));
+        }
+    } else {
+        None
+    };
+    pyo3_async_runtimes::tokio::future_into_py(py, async move {
+        let grouped = engine::relations::batch_fetch_many_to_many(
+            &pool, tx_mutex.as_ref(), &url, &target_table, &junction_table,
+            &left_key, &right_key, &parent_ids,
+        )
+        .await
+        .map_err(bridge_error_to_py)?;
+        Python::with_gil(|py| {
+            let result_dict = PyDict::new_bound(py);
+            for (parent_id, rows) in grouped {
+                let row_list: Vec<PyObject> = rows
+                    .iter()
+                    .map(|row| {
+                        engine::hydrator::hydrate_row(py, &target_table, row)
+                            .map(|d| d.to_object(py))
+                    })
+                    .collect::<PyResult<Vec<_>>>()?;
+                result_dict.set_item(&parent_id, row_list)?;
+            }
+            Ok(result_dict.to_object(py))
+        })
+    })
+}
+
+#[pyfunction]
+#[pyo3(signature = (table, parent_key, parent_ids, tx=None))]
+fn batch_fetch_self_ref<'py>(
+    py: Python<'py>,
+    table: String,
+    parent_key: String,
+    parent_ids: Vec<String>,
+    tx: Option<PyObject>,
+) -> PyResult<Bound<'py, PyAny>> {
+    let pool_guard = POOL.read().unwrap();
+    let pool = pool_guard
+        .as_ref()
+        .ok_or_else(|| PyException::new_err("Connection pool not initialized"))?
+        .clone();
+    let url_guard = URL.read().unwrap();
+    let url = url_guard
+        .as_ref()
+        .ok_or_else(|| PyException::new_err("Connection URL not initialized"))?
+        .clone();
+    let tx_mutex = if let Some(tx_obj) = tx {
+        if let Ok(session) = tx_obj.extract::<engine::session::Session>(py) {
+            Some(session.transaction)
+        } else if let Ok(tx_handle) = tx_obj.extract::<engine::transaction::TxHandle>(py) {
+            Some(tx_handle.inner)
+        } else {
+            return Err(PyValueError::new_err("Invalid transaction or session object"));
+        }
+    } else {
+        None
+    };
+    pyo3_async_runtimes::tokio::future_into_py(py, async move {
+        let grouped = engine::relations::batch_fetch_self_ref(
+            &pool, tx_mutex.as_ref(), &url, &table, &parent_key, &parent_ids,
+        )
+        .await
+        .map_err(bridge_error_to_py)?;
+        Python::with_gil(|py| {
+            let result_dict = PyDict::new_bound(py);
+            for (parent_id, rows) in grouped {
+                let row_list: Vec<PyObject> = rows
+                    .iter()
+                    .map(|row| {
+                        engine::hydrator::hydrate_row(py, &table, row)
+                            .map(|d| d.to_object(py))
+                    })
+                    .collect::<PyResult<Vec<_>>>()?;
+                result_dict.set_item(&parent_id, row_list)?;
+            }
+            Ok(result_dict.to_object(py))
+        })
+    })
+}
+
+#[pyfunction]
 fn begin_transaction(py: Python<'_>) -> PyResult<Bound<'_, PyAny>> {
     let pool_guard = POOL.read().unwrap();
     let pool = pool_guard
@@ -1165,6 +1327,9 @@ pub fn register_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(fetch_one_to_many, m)?)?;
     m.add_function(wrap_pyfunction!(fetch_many_to_many, m)?)?;
     m.add_function(wrap_pyfunction!(fetch_self_ref, m)?)?;
+    m.add_function(wrap_pyfunction!(batch_fetch_one_to_many, m)?)?;
+    m.add_function(wrap_pyfunction!(batch_fetch_many_to_many, m)?)?;
+    m.add_function(wrap_pyfunction!(batch_fetch_self_ref, m)?)?;
     m.add_function(wrap_pyfunction!(delete_row, m)?)?;
     m.add_function(wrap_pyfunction!(execute_raw, m)?)?;
     m.add_function(wrap_pyfunction!(resolve_type, m)?)?;

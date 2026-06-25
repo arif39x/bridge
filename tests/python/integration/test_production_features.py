@@ -1,10 +1,10 @@
 import asyncio
 import pytest
 import os
-from bridge_orm import connect, BaseModel, User, Post
-from bridge_orm.core.relations import HasMany, BelongsToMany, SelfReferential
-from bridge_orm.common.exceptions import ProjectionError, CompositeKeyError
-from bridge_orm.api.generate import generate_router
+from bridge import connect, BaseModel, User, Post
+from bridge.core.relations import HasMany, BelongsToMany, SelfReferential
+from bridge.common.exceptions import ProjectionError, CompositeKeyError
+from bridge.api.generate import generate_router
 from fastapi import FastAPI
 from httpx import AsyncClient, ASGITransport
 
@@ -43,11 +43,11 @@ async def test_production_features():
     await connect(db_url)
     
     # Setup tables
-    import bridge_orm_rs
-    await bridge_orm_rs.execute_raw("CREATE TABLE users (id TEXT PRIMARY KEY, username TEXT, email TEXT)")
-    await bridge_orm_rs.execute_raw("CREATE TABLE posts (id TEXT PRIMARY KEY, title TEXT, user_id TEXT)")
-    await bridge_orm_rs.execute_raw("CREATE TABLE groups (id TEXT PRIMARY KEY, name TEXT)")
-    await bridge_orm_rs.execute_raw("CREATE TABLE memberships (user_id TEXT, group_id TEXT, role TEXT, PRIMARY KEY (user_id, group_id))")
+    import bridge_rs
+    await bridge_rs.execute_raw("CREATE TABLE users (id TEXT PRIMARY KEY, username TEXT, email TEXT)")
+    await bridge_rs.execute_raw("CREATE TABLE posts (id TEXT PRIMARY KEY, title TEXT, user_id TEXT)")
+    await bridge_rs.execute_raw("CREATE TABLE groups (id TEXT PRIMARY KEY, name TEXT)")
+    await bridge_rs.execute_raw("CREATE TABLE memberships (user_id TEXT, group_id TEXT, role TEXT, PRIMARY KEY (user_id, group_id))")
 
     # 1. Test Partial Selects
     user = await EnhancedUser.create(username="miku", email="miku@vocaloid.jp")

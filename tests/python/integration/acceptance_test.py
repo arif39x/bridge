@@ -1,6 +1,6 @@
 import asyncio
 
-from bridge_orm import connect, NotFoundError, User, Post
+from bridge import connect, NotFoundError, User, Post
 
 
 async def main():

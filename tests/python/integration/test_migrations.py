@@ -2,8 +2,8 @@ import os
 import shutil
 import pytest
 import asyncio
-from bridge_orm import BaseModel, connect, execute_raw
-from bridge_orm.schema import MigrationEngine, MIGRATIONS_DIR
+from bridge import BaseModel, connect, execute_raw
+from bridge.schema import MigrationEngine, MIGRATIONS_DIR
 
 class MigrationUser(BaseModel):
     table = "migration_users_gen"
@@ -17,7 +17,7 @@ class MigrationUser(BaseModel):
 def clean_migrations():
     if os.path.exists(MIGRATIONS_DIR):
         shutil.rmtree(MIGRATIONS_DIR)
-    from bridge_orm.core import _MODEL_REGISTRY
+    from bridge.core import _MODEL_REGISTRY
     # Preserve original core models but clear test models
     keys_to_remove = [k for k in _MODEL_REGISTRY.keys() if "migration" in k]
     for k in keys_to_remove:
@@ -78,7 +78,7 @@ async def test_migration_apply(clean_migrations):
     engine = MigrationEngine(dialect="sqlite")
     engine.generate_migration("init")
     
-    from bridge_orm.cli import main
+    from bridge.cli import main
     import sys
     from unittest.mock import patch
     

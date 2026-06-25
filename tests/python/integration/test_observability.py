@@ -2,7 +2,7 @@ import pytest
 import pytest_asyncio
 import logging
 import asyncio
-from bridge_orm import connect, User, execute_raw
+from bridge import connect, User, execute_raw
 
 class MockLogHandler(logging.Handler):
     def __init__(self):
@@ -29,7 +29,7 @@ async def db_setup():
 @pytest.mark.asyncio
 async def test_unified_observability(db_setup):
     """Verify that Rust spans are correctly bridged into Python logging."""
-    logger = logging.getLogger("bridge_orm.telemetry")
+    logger = logging.getLogger("bridge.telemetry")
     logger.setLevel(logging.DEBUG)
     handler = MockLogHandler()
     logger.addHandler(handler)

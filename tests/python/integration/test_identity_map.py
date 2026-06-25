@@ -2,7 +2,7 @@ import pytest
 import pytest_asyncio
 import asyncio
 import os
-from bridge_orm import connect, User, execute_raw, transaction
+from bridge import connect, User, execute_raw, transaction
 
 @pytest_asyncio.fixture
 async def db_setup(request):

@@ -10,9 +10,9 @@ use tokio::runtime::Runtime;
 static RUNTIME: Lazy<Runtime> =
     Lazy::new(|| Runtime::new().expect("Failed to create Tokio runtime for Java"));
 
-/// This example assumes a package: io.bridgeorm.core.BridgeORM
+/// This example assumes a package: io.bridge.core.Bridge
 #[no_mangle]
-pub extern "system" fn Java_io_bridgeorm_core_BridgeORM_connectNative(
+pub extern "system" fn Java_io_bridgeorm_core_Bridge_connectNative(
     mut env: JNIEnv,
     _class: JClass,
     url: JString,

@@ -1,6 +1,6 @@
 <div align="center">
 
-# BridgeORM
+# Bridge
 
 [![Performance: Native FFI](https://img.shields.io/badge/Performance-Native_FFI-red.svg)](#architecture)
 [![Async: Tokio/Asyncio](https://img.shields.io/badge/Async-Tokio%2FAsyncio-blue.svg)](#architecture)
@@ -8,7 +8,7 @@
 [![Reliability: Circuit_Breaker](https://img.shields.io/badge/Reliability-Circuit_Breaker-gold.svg)](#security-mandate)
 [![Observability: OpenTelemetry](https://img.shields.io/badge/Observability-OpenTelemetry-blueviolet.svg)](#architecture)
 
-**BridgeORM** is a cross-language ORM (Rust+Python). It is lightweight, secure by default.
+**Bridge** is a cross-language ORM (Rust+Python). It is lightweight, secure by default.
 
 </div>
 
@@ -16,18 +16,18 @@
 
 ## Architecture
 
-**BridgeORM** uses the **Performance Bridge** principle by splitting the ORM into two distinct parts to maximize both **Speed** and **Developer Ergonomics**:
+**Bridge** uses the **Performance Bridge** principle by splitting the ORM into two distinct parts to maximize both **Speed** and **Developer Ergonomics**:
 
 1.  **Expression Layer (Python)**: A thin, expressive API that allows developers to write intuitive queries and models. It handles high-level logic and task-local identity mapping.
 2.  **Execution Engine (Rust)**: An ultra-fast core built on `sqlx` and `tokio`. It handles connection pooling, SQL construction, row hydration, and cross-language telemetry.
 
-Instead of slow HTTP or JSON-over-pipe communication, BridgeORM utilizes **Native Memory Bindings (FFI)**, allowing data to flow between Python and Rust with near-zero latency.
+Instead of slow HTTP or JSON-over-pipe communication, Bridge utilizes **Native Memory Bindings (FFI)**, allowing data to flow between Python and Rust with near-zero latency.
 
 ---
 
 ## Supported SQL Databases
 
-BridgeORM provides native and protocol-compatible support for a wide range of modern and enterprise databases:
+Bridge provides native and protocol-compatible support for a wide range of modern and enterprise databases:
 
 | Database          | Compatibility     | Specific Optimizations                                  |
 | :---------------- | :---------------- | :------------------------------------------------------ |
@@ -48,8 +48,8 @@ BridgeORM provides native and protocol-compatible support for a wide range of mo
 
 ## Security Mandate
 
-When I started designing BridgeORM, my absolute priority was **Security**. I’ve tried my best to build a secure wall around your data..
-Here is how BridgeORM protection works around your data:
+When I started designing Bridge, my absolute priority was **Security**. I’ve tried my best to build a secure wall around your data..
+Here is how Bridge protection works around your data:
 
 1.  **Forbidden String Interpolation**: I have strictly forbidden string interpolation in queries. If it's not parameterized, it doesn't run. Period.
 2.  **Rust-Level Guardrails**: Before any dynamic SQL identifier even reaches the database, the **Rust Engine** forces it through a strict regular expression validator. No sneak attacks.
@@ -79,6 +79,6 @@ Collaborator Must Follow This Rules:
 
 ## Current Limitations
 
-- **Eager Loading**: Relations currently utilize high-speed Lazy Loading; native `prefetch_related` is on the roadmap.
+- **Eager Loading**: Relations support both high-speed Lazy Loading (per-relation) and batch `prefetch_related` via `QueryBuilder.with_relation()` / `.prefetch_related()`.
 - **SQL Complexity**: Advanced operations like CTEs and Window Functions require the `execute_raw()` fallback.
 - **Identity Isolation**: The Identity Map is strictly scoped per `asyncio.Task` to ensure memory safety.

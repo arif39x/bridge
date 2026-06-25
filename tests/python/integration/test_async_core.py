@@ -1,7 +1,7 @@
 import pytest
 import pytest_asyncio
 import asyncio
-from bridge_orm import connect, User, Post, transaction, execute_raw, NotFoundError
+from bridge import connect, User, Post, transaction, execute_raw, NotFoundError
 
 @pytest_asyncio.fixture
 async def db_session():

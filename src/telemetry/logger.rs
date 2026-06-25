@@ -55,7 +55,7 @@ pub fn emit_telemetry(event: TelemetryEvent) {
     // Rust-side structured logging
     if event.duration_micros > slow_threshold * 1000 {
         info!(
-            "[BridgeORM SLOW QUERY] {} | {}μs | table={}",
+            "[Bridge SLOW QUERY] {} | {}μs | table={}",
             event.sql, event.duration_micros, event.table
         );
     }

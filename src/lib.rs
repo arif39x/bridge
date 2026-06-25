@@ -4,11 +4,11 @@ pub mod ffi;
 pub mod schema;
 pub mod telemetry;
 
-pub use error::{BridgeOrmError, BridgeOrmResult};
+pub use error::{BridgeError, BridgeResult};
 
 use pyo3::prelude::*;
 
 #[pymodule]
-fn bridge_orm_rs(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn bridge_rs(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     ffi::register_module(m)
 }

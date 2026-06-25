@@ -1,5 +1,5 @@
 use crate::engine::metadata::REGISTRY;
-use crate::error::BridgeOrmResult;
+use crate::error::BridgeResult;
 use arrow::array::{ArrayRef, BooleanBuilder, Float64Builder, Int64Builder, StringBuilder};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
@@ -7,7 +7,7 @@ use arrow_ipc::writer::StreamWriter;
 use sqlx::{any::AnyRow, Column, Row};
 use std::sync::Arc;
 
-pub fn rows_to_arrow_ipc(table_name: &str, rows: &[AnyRow]) -> BridgeOrmResult<Vec<u8>> {
+pub fn rows_to_arrow_ipc(table_name: &str, rows: &[AnyRow]) -> BridgeResult<Vec<u8>> {
     if rows.is_empty() {
         return Ok(Vec::new());
     }

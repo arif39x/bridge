@@ -1,6 +1,6 @@
 use crate::engine::dirty_tracker::DirtyTracker;
 use crate::engine::query::QueryValue;
-use crate::error::BridgeOrmResult;
+use crate::error::BridgeResult;
 use pyo3::prelude::*;
 use sqlx::{Any, AnyPool, Transaction};
 use std::collections::HashMap;
@@ -116,7 +116,7 @@ impl Session {
     }
 }
 
-pub async fn begin_session(pool: AnyPool) -> BridgeOrmResult<Session> {
+pub async fn begin_session(pool: AnyPool) -> BridgeResult<Session> {
     let tx = pool.begin().await?;
     Ok(Session {
         pool,

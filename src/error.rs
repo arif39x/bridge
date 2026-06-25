@@ -27,10 +27,10 @@ impl fmt::Display for DiagnosticInfo {
     }
 }
 
-/// Unified error enum for the entire BridgeORM library.
+/// Unified error enum for the entire Bridge library.
 #[derive(Debug, Error)]
 #[non_exhaustive]
-pub enum BridgeOrmError {
+pub enum BridgeError {
     #[error("Database error: {0}\n{1}")]
     Database(sqlx::Error, DiagnosticInfo),
 
@@ -58,19 +58,19 @@ pub enum BridgeOrmError {
     },
 }
 
-impl From<sqlx::Error> for BridgeOrmError {
+impl From<sqlx::Error> for BridgeError {
     fn from(err: sqlx::Error) -> Self {
         Self::Database(err, DiagnosticInfo::default())
     }
 }
 
-impl From<serde_json::Error> for BridgeOrmError {
+impl From<serde_json::Error> for BridgeError {
     fn from(err: serde_json::Error) -> Self {
         Self::Serialization(err, DiagnosticInfo::default())
     }
 }
 
-impl BridgeOrmError {
+impl BridgeError {
     pub fn add_breadcrumb(mut self, crumb: &str) -> Self {
         let info = match self {
             Self::Database(_, ref mut info) => info,
@@ -101,5 +101,5 @@ impl BridgeOrmError {
     }
 }
 
-/// Type alias for Results returned by BridgeORM functions.
-pub type BridgeOrmResult<T> = Result<T, BridgeOrmError>;
+/// Type alias for Results returned by Bridge functions.
+pub type BridgeResult<T> = Result<T, BridgeError>;
