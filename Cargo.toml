@@ -54,10 +54,3 @@ java-interop = ["jni"]
 [dev-dependencies]
 criterion = { version = "0.5", features = ["async_tokio"] }
 
-[[bench]]
-name = "marshalling_bench"
-harness = false
-
-[[bench]]
-name = "baseline_bench"
-harness = false

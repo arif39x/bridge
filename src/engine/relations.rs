@@ -1,6 +1,6 @@
 use crate::engine::db::{generic_select_in, validate_identifier, SqlDialect};
 use crate::error::{BridgeError, BridgeResult, DiagnosticInfo};
-use sqlx::{any::AnyRow, AnyPool};
+use sqlx::{any::AnyRow, Row, AnyPool};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -138,7 +138,7 @@ pub async fn batch_fetch_one_to_many(
     let mut grouped: HashMap<String, Vec<AnyRow>> = HashMap::new();
     for row in &rows {
         if let Ok(fk) = row.try_get::<String, _>(foreign_key) {
-            grouped.entry(fk).or_default().push(row);
+            grouped.entry(fk).or_default().push(row.clone());
         }
     }
     Ok(grouped)
@@ -195,7 +195,7 @@ pub async fn batch_fetch_many_to_many(
     let mut grouped: HashMap<String, Vec<AnyRow>> = HashMap::new();
     for row in &rows {
         if let Ok(left_id) = row.try_get::<String, _>("__bridge_left_id") {
-            grouped.entry(left_id).or_default().push(row);
+            grouped.entry(left_id).or_default().push(row.clone());
         }
     }
     Ok(grouped)
@@ -215,7 +215,7 @@ pub async fn batch_fetch_self_ref(
     let mut grouped: HashMap<String, Vec<AnyRow>> = HashMap::new();
     for row in &rows {
         if let Ok(pk) = row.try_get::<String, _>(parent_key) {
-            grouped.entry(pk).or_default().push(row);
+            grouped.entry(pk).or_default().push(row.clone());
         }
     }
     Ok(grouped)
