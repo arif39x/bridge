@@ -18,7 +18,7 @@ macro_rules! ffi_guard {
 }
 
 use crate::engine;
-use crate::error::{BridgeError, BridgeResult};
+use crate::error::{BridgeError, BridgeResult, DiagnosticInfo};
 use crate::schema;
 use crate::telemetry;
 pub mod java;
@@ -124,6 +124,7 @@ fn query_value_to_py(py: Python<'_>, v: QueryValue) -> PyObject {
                 .to_object(py)
         }
         QueryValue::Bytes(b) => b.to_object(py),
+        #[cfg(feature = "allow-raw-sql")]
         QueryValue::Raw(raw) => {
             let dict = PyDict::new_bound(py);
             dict.set_item("sql", raw.sql).unwrap();
@@ -198,17 +199,29 @@ fn py_to_query_value(
 
     // Check for Raw expression
     if let Ok(sql_attr) = obj.getattr("sql") {
-        if let Ok(sql) = sql_attr.extract::<String>() {
+        if sql_attr.extract::<String>().is_ok() {
             if let Ok(params_attr) = obj.getattr("params") {
-                if let Ok(params_py) = params_attr.extract::<Vec<Bound<'_, PyAny>>>() {
-                    let mut params = Vec::new();
-                    for p in params_py {
-                        params.push(py_to_query_value(py, &p, table_name, column_name)?);
+                if params_attr.extract::<Vec<Bound<'_, PyAny>>>().is_ok() {
+                    #[cfg(feature = "allow-raw-sql")]
+                    {
+                        let sql = sql_attr.extract::<String>().unwrap();
+                        let params_py = params_attr.extract::<Vec<Bound<'_, PyAny>>>().unwrap();
+                        let mut params = Vec::new();
+                        for p in params_py {
+                            params.push(py_to_query_value(py, &p, table_name, column_name)?);
+                        }
+                        return Ok(QueryValue::Raw(crate::engine::query::RawExpression {
+                            sql,
+                            params,
+                        }));
                     }
-                    return Ok(QueryValue::Raw(crate::engine::query::RawExpression {
-                        sql,
-                        params,
-                    }));
+                    #[cfg(not(feature = "allow-raw-sql"))]
+                    {
+                        return Err(BridgeError::Validation(
+                            "Raw SQL expressions are not supported. Rebuild with `--features allow-raw-sql` to enable.".to_string(),
+                            DiagnosticInfo::default(),
+                        ));
+                    }
                 }
             }
         }

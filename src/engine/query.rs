@@ -2,6 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+#[cfg(feature = "allow-raw-sql")]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RawExpression {
     pub sql: String,
@@ -18,6 +19,7 @@ pub enum QueryValue {
     DateTime(DateTime<Utc>),
     Json(serde_json::Value),
     Bytes(Vec<u8>),
+    #[cfg(feature = "allow-raw-sql")]
     Raw(RawExpression),
     Null,
 }

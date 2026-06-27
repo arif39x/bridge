@@ -14,8 +14,12 @@ use tokio::sync::Mutex;
 
 /// Constants for SQL validation and formatting.
 const VALID_IDENTIFIER_REGEX: &str = r"^[a-zA-Z_][a-zA-Z0-9_]*$";
-const RESERVED_KEYWORDS: [&str; 8] = [
+/// SQL keywords prohibited as identifiers. The regex `VALID_IDENTIFIER_REGEX`
+/// already prevents dangerous characters (`;`, `--`, `'`), so this is defense-in-depth.
+const RESERVED_KEYWORDS: [&str; 18] = [
     "SELECT", "DROP", "TABLE", "DELETE", "UPDATE", "INSERT", "TRUNCATE", "ALTER",
+    "CREATE", "EXEC", "EXECUTE", "UNION", "ALL", "INTO", "FROM", "WHERE",
+    "GRANT", "REVOKE",
 ];
 
 pub static VALID_SQL_IDENTIFIER_PATTERN: Lazy<Regex> =
@@ -95,14 +99,12 @@ pub trait Dialect: Send + Sync {
             for (col, val) in filters {
                 validate_identifier(col)?;
                 match val {
-                    QueryValue::Raw(raw) => {
-                        let mut sql_fragment = raw.sql.clone();
-                        for p in &raw.params {
-                            let placeholder = self.get_placeholder(values.len());
-                            sql_fragment = sql_fragment.replacen("{}", &placeholder, 1);
-                            values.push(p.clone());
-                        }
-                        conditions.push(format!("{} {}", self.quote_identifier(col), sql_fragment));
+                    #[cfg(feature = "allow-raw-sql")]
+                    QueryValue::Raw(_) => {
+                        return Err(BridgeError::Validation(
+                            "Raw SQL expressions are not allowed in WHERE clauses. Use `raw_filter()` for explicit opt-in.".to_string(),
+                            DiagnosticInfo::default(),
+                        ));
                     }
                     _ => {
                         conditions.push(format!(
@@ -191,14 +193,12 @@ impl Dialect for OracleDialect {
             for (col, val) in filters {
                 validate_identifier(col)?;
                 match val {
-                    QueryValue::Raw(raw) => {
-                        let mut sql_fragment = raw.sql.clone();
-                        for p in &raw.params {
-                            let placeholder = self.get_placeholder(values.len());
-                            sql_fragment = sql_fragment.replacen("{}", &placeholder, 1);
-                            values.push(p.clone());
-                        }
-                        conditions.push(format!("{} {}", self.quote_identifier(col), sql_fragment));
+                    #[cfg(feature = "allow-raw-sql")]
+                    QueryValue::Raw(_) => {
+                        return Err(BridgeError::Validation(
+                            "Raw SQL expressions are not allowed in WHERE clauses. Use `raw_filter()` for explicit opt-in.".to_string(),
+                            DiagnosticInfo::default(),
+                        ));
                     }
                     _ => {
                         conditions.push(format!(
@@ -301,6 +301,26 @@ pub fn validate_identifier(identifier: &str) -> BridgeResult<()> {
     Ok(())
 }
 
+/// Defense-in-depth: validates that a `QueryValue` used as a filter value
+/// does not contain obvious SQL injection patterns.
+/// NOTE: Parameterized queries already prevent injection through values;
+/// this is an extra safety net.
+#[must_use]
+pub fn validate_filter_value(value: &QueryValue) -> BridgeResult<()> {
+    if let QueryValue::String(s) = value {
+        let lower = s.to_lowercase();
+        if lower.contains("';") || lower.contains("--") || lower.contains("/*") {
+            return Err(BridgeError::Validation(
+                format!(
+                    "Security Violation: Filter value contains suspicious SQL pattern",
+                ),
+                DiagnosticInfo::default(),
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Establishes a connection pool using the provided URL and configuration.
 /// Uses sqlx's built-in pool.
 #[must_use]
@@ -369,6 +389,7 @@ fn bind_query_value<'q>(
         QueryValue::DateTime(dt) => query.bind(dt.to_rfc3339()),
         QueryValue::Json(j) => query.bind(j.to_string()),
         QueryValue::Bytes(b) => query.bind(b),
+        #[cfg(feature = "allow-raw-sql")]
         QueryValue::Raw(_) => panic!("RawExpression should have been expanded before binding"),
         QueryValue::Null => query.bind(None::<String>),
     }
@@ -400,14 +421,12 @@ pub async fn generic_update(
     for (col, val) in data {
         validate_identifier(&col)?;
         match val {
-            QueryValue::Raw(raw) => {
-                let mut sql_fragment = raw.sql.clone();
-                for p in raw.params {
-                    let placeholder = dialect.get_placeholder(values.len());
-                    sql_fragment = sql_fragment.replacen("{}", &placeholder, 1);
-                    values.push(p);
-                }
-                set_clauses.push(format!("{} = {}", dialect.quote_identifier(&col), sql_fragment));
+            #[cfg(feature = "allow-raw-sql")]
+            QueryValue::Raw(_) => {
+                return Err(BridgeError::Validation(
+                    "Raw SQL expressions are not allowed in SET clauses. Use `execute_raw()` instead.".to_string(),
+                    DiagnosticInfo::default(),
+                ));
             }
             _ => {
                 set_clauses.push(format!(
@@ -426,15 +445,14 @@ pub async fn generic_update(
         let mut where_clauses = Vec::new();
         for (col, val) in filters {
             validate_identifier(&col)?;
+            validate_filter_value(&val)?;
             match val {
-                QueryValue::Raw(raw) => {
-                    let mut sql_fragment = raw.sql.clone();
-                    for p in raw.params {
-                        let placeholder = dialect.get_placeholder(values.len());
-                        sql_fragment = sql_fragment.replacen("{}", &placeholder, 1);
-                        values.push(p);
-                    }
-                    where_clauses.push(format!("{} {}", dialect.quote_identifier(&col), sql_fragment));
+                #[cfg(feature = "allow-raw-sql")]
+                QueryValue::Raw(_) => {
+                    return Err(BridgeError::Validation(
+                        "Raw SQL expressions are not allowed in WHERE clauses. Use `raw_filter()` for explicit opt-in.".to_string(),
+                        DiagnosticInfo::default(),
+                    ));
                 }
                 _ => {
                     where_clauses.push(format!(
@@ -500,15 +518,14 @@ pub async fn generic_delete(
         let mut where_clauses = Vec::new();
         for (col, val) in filters {
             validate_identifier(&col)?;
+            validate_filter_value(&val)?;
             match val {
-                QueryValue::Raw(raw) => {
-                    let mut sql_fragment = raw.sql.clone();
-                    for p in raw.params {
-                        let placeholder = dialect.get_placeholder(values.len());
-                        sql_fragment = sql_fragment.replacen("{}", &placeholder, 1);
-                        values.push(p);
-                    }
-                    where_clauses.push(format!("{} {}", dialect.quote_identifier(&col), sql_fragment));
+                #[cfg(feature = "allow-raw-sql")]
+                QueryValue::Raw(_) => {
+                    return Err(BridgeError::Validation(
+                        "Raw SQL expressions are not allowed in WHERE clauses. Use `raw_filter()` for explicit opt-in.".to_string(),
+                        DiagnosticInfo::default(),
+                    ));
                 }
                 _ => {
                     where_clauses.push(format!(
@@ -595,14 +612,12 @@ pub async fn generic_insert(
         validate_identifier(col)?;
         columns.push(col.clone());
         match val {
-            QueryValue::Raw(raw) => {
-                let mut sql_fragment = raw.sql.clone();
-                for p in &raw.params {
-                    let placeholder = dialect.get_placeholder(values.len());
-                    sql_fragment = sql_fragment.replacen("{}", &placeholder, 1);
-                    values.push(p.clone());
-                }
-                placeholders.push(sql_fragment);
+            #[cfg(feature = "allow-raw-sql")]
+            QueryValue::Raw(_) => {
+                return Err(BridgeError::Validation(
+                    "Raw SQL expressions are not allowed in VALUES clauses. Use `execute_raw()` instead.".to_string(),
+                    DiagnosticInfo::default(),
+                ));
             }
             _ => {
                 placeholders.push(dialect.get_placeholder(values.len()));
@@ -694,14 +709,12 @@ pub async fn generic_insert_bulk(
         for col in &columns {
             let val = item.get(col).cloned().unwrap_or(QueryValue::Null);
             match val {
-                QueryValue::Raw(raw) => {
-                    let mut sql_fragment = raw.sql.clone();
-                    for p in raw.params {
-                        let placeholder = dialect.get_placeholder(all_values.len());
-                        sql_fragment = sql_fragment.replacen("{}", &placeholder, 1);
-                        all_values.push(p);
-                    }
-                    row_placeholders.push(sql_fragment);
+                #[cfg(feature = "allow-raw-sql")]
+                QueryValue::Raw(_) => {
+                    return Err(BridgeError::Validation(
+                        "Raw SQL expressions are not allowed in VALUES clauses. Use `execute_raw()` instead.".to_string(),
+                        DiagnosticInfo::default(),
+                    ));
                 }
                 _ => {
                     row_placeholders.push(dialect.get_placeholder(all_values.len()));
@@ -774,8 +787,9 @@ pub async fn generic_query(
     }
 
     let filter_vec: Vec<(String, QueryValue)> = filters.into_iter().collect();
-    for (col, _) in &filter_vec {
+    for (col, val) in &filter_vec {
         validate_identifier(col)?;
+        validate_filter_value(val)?;
     }
 
     let (sql, values) = dialect.build_select(table_name, &columns, &filter_vec, limit)?;

@@ -39,7 +39,7 @@ class QueryBuilder:
     # Fluent interface for building and executing database queries.
     # Rule: Use __slots__ on hot-path classes.
 
-    __slots__ = ("model_class", "_filters", "_limit", "_projection", "_eager_load_requests")
+    __slots__ = ("model_class", "_filters", "_raw_filters", "_limit", "_projection", "_eager_load_requests")
 
     def __init__(self, model_class: Type["BaseModel"]) -> None:
 
@@ -49,6 +49,7 @@ class QueryBuilder:
 
         self.model_class = model_class
         self._filters: Dict[str, Any] = {}
+        self._raw_filters: Dict[str, "Raw"] = {}
         self._limit: Optional[int] = None
         self._projection: Optional[List[str]] = None
         self._eager_load_requests: List[EagerLoadRequest] = []
@@ -65,15 +66,17 @@ class QueryBuilder:
         return self
 
     def filter(self, **kwargs: Any) -> "QueryBuilder":
-
-        # Add filters to the query.
-        # Args:
-        #    **kwargs: Column names and values to filter by.
-
-        # Returns:
-        #   The QueryBuilder instance for chaining.
-        #
+        for col, val in kwargs.items():
+            if isinstance(val, Raw):
+                raise TypeError(
+                    f"Raw SQL expressions are not allowed in filter(). "
+                    f"Use raw_filter('{col}', {val!r}) for explicit opt-in."
+                )
         self._filters.update(kwargs)
+        return self
+
+    def raw_filter(self, column: str, raw_expr: "Raw") -> "QueryBuilder":
+        self._raw_filters[column] = raw_expr
         return self
 
     def limit(self, count: int) -> "QueryBuilder":
@@ -137,7 +140,8 @@ class QueryBuilder:
         """
         return {
             "table": self.model_class.table,
-            "filters": self._filters,
+            "filters": self._merged_filters(),
+            "raw_filters": dict(self._raw_filters),
             "limit": self._limit,
             "projection": self._projection,
             "eager_loads": [
@@ -149,6 +153,11 @@ class QueryBuilder:
             ],
         }
 
+    def _merged_filters(self) -> Dict[str, Any]:
+        filters = dict(self._filters)
+        filters.update(self._raw_filters)
+        return filters
+
     async def fetch(self, tx: Any = None) -> List[Any]:
         """
         Execute the query and return all results as model instances.
@@ -159,7 +168,7 @@ class QueryBuilder:
         Raises:
             DatabaseError: If the database engine returns an error.
         """
-        filters = self._filters
+        filters = self._merged_filters()
         try:
             # Handle Session or TxHandle
             rs_tx = tx._rs_session if hasattr(tx, "_rs_session") else tx
@@ -241,7 +250,7 @@ class QueryBuilder:
         import pyarrow as pa
         from .lazy import LazyModelProxy
         
-        filters = self._filters
+        filters = self._merged_filters()
         try:
             # Handle Session or TxHandle
             rs_tx = tx._rs_session if hasattr(tx, "_rs_session") else tx
@@ -275,7 +284,7 @@ class QueryBuilder:
         Returns:
             An async iterator of model instances.
         """
-        filters = self._filters
+        filters = self._merged_filters()
         # Handle Session or TxHandle
         rs_tx = tx._rs_session if hasattr(tx, "_rs_session") else tx
         stream = bridge_rs.fetch_lazy(

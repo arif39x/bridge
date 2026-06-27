@@ -111,28 +111,8 @@ pub fn coerce_py_value(
             Err(type_error(table_name, meta, "invalid json"))
         }
         _ => {
-            // Fallback to basic string conversion if type is unknown but allow Raw expressions
-            if let Ok(sql_attr) = py_val.getattr("sql") {
-                if let Ok(sql) = sql_attr.extract::<String>() {
-                    if let Ok(params_attr) = py_val.getattr("params") {
-                        if let Ok(params_py) = params_attr.extract::<Vec<Bound<'_, PyAny>>>() {
-                            let mut params = Vec::new();
-                            // For Raw expression params, might not have metadata easily available here
-                            // but  try to guess or just convert them simply.
-                            for p in params_py {
-                                // Recursive call with a placeholder if needed, or just default conversion
-                                params.push(crate::ffi::py_to_query_value(
-                                    py, &p, table_name, &meta.name,
-                                )?);
-                            }
-                            return Ok(QueryValue::Raw(crate::engine::query::RawExpression {
-                                sql,
-                                params,
-                            }));
-                        }
-                    }
-                }
-            }
+            // Fallback to basic string conversion for unknown types
+            // (Raw SQL expressions are intercepted at the py_to_query_value level instead)
 
             if let Ok(s) = py_val.extract::<String>() {
                 Ok(QueryValue::String(s))
