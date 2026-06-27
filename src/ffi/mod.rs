@@ -719,6 +719,7 @@ fn delete_row<'py>(
     })
 }
 
+#[cfg(feature = "allow-raw-sql")]
 #[pyfunction]
 fn execute_raw(py: Python<'_>, sql: String) -> PyResult<Bound<'_, PyAny>> {
     let pool_guard = POOL.read().unwrap();
@@ -1331,6 +1332,7 @@ pub fn register_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(batch_fetch_many_to_many, m)?)?;
     m.add_function(wrap_pyfunction!(batch_fetch_self_ref, m)?)?;
     m.add_function(wrap_pyfunction!(delete_row, m)?)?;
+    #[cfg(feature = "allow-raw-sql")]
     m.add_function(wrap_pyfunction!(execute_raw, m)?)?;
     m.add_function(wrap_pyfunction!(resolve_type, m)?)?;
     m.add_function(wrap_pyfunction!(engine::metadata::register_entity, m)?)?;

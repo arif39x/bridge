@@ -103,6 +103,9 @@ async def delete_item(
     if not model_cls:
         raise HTTPException(status_code=404, detail="Table not found")
 
-    import bridge_rs
-    await bridge_rs.execute_raw(f"DELETE FROM {table} WHERE id = '{pk}'")
+    item = await model_cls.find_one(id=pk)
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    await item.delete()
     return {"status": "deleted"}

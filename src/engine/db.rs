@@ -54,17 +54,19 @@ pub trait Dialect: Send + Sync {
         table: &str,
         column: &str,
         id_count: usize,
-    ) -> (String, Vec<QueryValue>) {
+    ) -> BridgeResult<(String, Vec<QueryValue>)> {
+        validate_identifier(table)?;
+        validate_identifier(column)?;
         let placeholders: Vec<String> = (0..id_count)
             .map(|i| self.get_placeholder(i))
             .collect();
         let sql = format!(
             "SELECT * FROM {} WHERE {} IN ({})",
-            table,
-            column,
+            self.quote_identifier(table),
+            self.quote_identifier(column),
             placeholders.join(", ")
         );
-        (sql, Vec::new())
+        Ok((sql, Vec::new()))
     }
     fn build_select(
         &self,
@@ -72,19 +74,26 @@ pub trait Dialect: Send + Sync {
         columns: &[String],
         filters: &[(String, QueryValue)],
         limit: Option<i64>,
-    ) -> (String, Vec<QueryValue>) {
+    ) -> BridgeResult<(String, Vec<QueryValue>)> {
+        validate_identifier(table)?;
         let cols = if columns.is_empty() {
             "*".to_string()
         } else {
-            columns.join(", ")
+            let mut quoted = Vec::with_capacity(columns.len());
+            for c in columns {
+                validate_identifier(c)?;
+                quoted.push(self.quote_identifier(c));
+            }
+            quoted.join(", ")
         };
-        let mut sql = format!("SELECT {} FROM {}", cols, table);
+        let mut sql = format!("SELECT {} FROM {}", cols, self.quote_identifier(table));
         let mut values = Vec::new();
 
         if !filters.is_empty() {
             sql.push_str(" WHERE ");
             let mut conditions = Vec::new();
             for (col, val) in filters {
+                validate_identifier(col)?;
                 match val {
                     QueryValue::Raw(raw) => {
                         let mut sql_fragment = raw.sql.clone();
@@ -93,12 +102,12 @@ pub trait Dialect: Send + Sync {
                             sql_fragment = sql_fragment.replacen("{}", &placeholder, 1);
                             values.push(p.clone());
                         }
-                        conditions.push(format!("{} {}", col, sql_fragment));
+                        conditions.push(format!("{} {}", self.quote_identifier(col), sql_fragment));
                     }
                     _ => {
                         conditions.push(format!(
                             "{} = {}",
-                            col,
+                            self.quote_identifier(col),
                             self.get_placeholder(values.len())
                         ));
                         values.push(val.clone());
@@ -112,7 +121,7 @@ pub trait Dialect: Send + Sync {
             sql.push_str(&format!(" LIMIT {}", l));
         }
 
-        (sql, values)
+        Ok((sql, values))
     }
 }
 
@@ -161,19 +170,26 @@ impl Dialect for OracleDialect {
         columns: &[String],
         filters: &[(String, QueryValue)],
         limit: Option<i64>,
-    ) -> (String, Vec<QueryValue>) {
+    ) -> BridgeResult<(String, Vec<QueryValue>)> {
+        validate_identifier(table)?;
         let cols = if columns.is_empty() {
             "*".to_string()
         } else {
-            columns.join(", ")
+            let mut quoted = Vec::with_capacity(columns.len());
+            for c in columns {
+                validate_identifier(c)?;
+                quoted.push(self.quote_identifier(c));
+            }
+            quoted.join(", ")
         };
-        let mut sql = format!("SELECT {} FROM {}", cols, table);
+        let mut sql = format!("SELECT {} FROM {}", cols, self.quote_identifier(table));
         let mut values = Vec::new();
 
         if !filters.is_empty() {
             sql.push_str(" WHERE ");
             let mut conditions = Vec::new();
             for (col, val) in filters {
+                validate_identifier(col)?;
                 match val {
                     QueryValue::Raw(raw) => {
                         let mut sql_fragment = raw.sql.clone();
@@ -182,12 +198,12 @@ impl Dialect for OracleDialect {
                             sql_fragment = sql_fragment.replacen("{}", &placeholder, 1);
                             values.push(p.clone());
                         }
-                        conditions.push(format!("{} {}", col, sql_fragment));
+                        conditions.push(format!("{} {}", self.quote_identifier(col), sql_fragment));
                     }
                     _ => {
                         conditions.push(format!(
                             "{} = {}",
-                            col,
+                            self.quote_identifier(col),
                             self.get_placeholder(values.len())
                         ));
                         values.push(val.clone());
@@ -202,7 +218,7 @@ impl Dialect for OracleDialect {
             sql.push_str(&format!(" FETCH NEXT {} ROWS ONLY", l));
         }
 
-        (sql, values)
+        Ok((sql, values))
     }
 }
 
@@ -377,7 +393,7 @@ pub async fn generic_update(
         return Ok(());
     }
 
-    let mut sql = format!("UPDATE {} SET ", table_name);
+    let mut sql = format!("UPDATE {} SET ", dialect.quote_identifier(table_name));
     let mut values = Vec::new();
     let mut set_clauses = Vec::new();
 
@@ -391,12 +407,12 @@ pub async fn generic_update(
                     sql_fragment = sql_fragment.replacen("{}", &placeholder, 1);
                     values.push(p);
                 }
-                set_clauses.push(format!("{} = {}", col, sql_fragment));
+                set_clauses.push(format!("{} = {}", dialect.quote_identifier(&col), sql_fragment));
             }
             _ => {
                 set_clauses.push(format!(
                     "{} = {}",
-                    col,
+                    dialect.quote_identifier(&col),
                     dialect.get_placeholder(values.len())
                 ));
                 values.push(val);
@@ -418,12 +434,12 @@ pub async fn generic_update(
                         sql_fragment = sql_fragment.replacen("{}", &placeholder, 1);
                         values.push(p);
                     }
-                    where_clauses.push(format!("{} {}", col, sql_fragment));
+                    where_clauses.push(format!("{} {}", dialect.quote_identifier(&col), sql_fragment));
                 }
                 _ => {
                     where_clauses.push(format!(
                         "{} = {}",
-                        col,
+                        dialect.quote_identifier(&col),
                         dialect.get_placeholder(values.len())
                     ));
                     values.push(val);
@@ -476,7 +492,7 @@ pub async fn generic_delete(
     let dialect_type = SqlDialect::from_url(url);
     let dialect = dialect_type.to_dialect();
 
-    let mut sql = format!("DELETE FROM {}", table_name);
+    let mut sql = format!("DELETE FROM {}", dialect.quote_identifier(table_name));
     let mut values = Vec::new();
 
     if !filters.is_empty() {
@@ -492,12 +508,12 @@ pub async fn generic_delete(
                         sql_fragment = sql_fragment.replacen("{}", &placeholder, 1);
                         values.push(p);
                     }
-                    where_clauses.push(format!("{} {}", col, sql_fragment));
+                    where_clauses.push(format!("{} {}", dialect.quote_identifier(&col), sql_fragment));
                 }
                 _ => {
                     where_clauses.push(format!(
                         "{} = {}",
-                        col,
+                        dialect.quote_identifier(&col),
                         dialect.get_placeholder(values.len())
                     ));
                     values.push(val);
@@ -595,10 +611,11 @@ pub async fn generic_insert(
         }
     }
 
+    let quoted_cols: Vec<String> = columns.iter().map(|c| dialect.quote_identifier(c)).collect();
     let sql = format!(
         "INSERT INTO {} ({}) VALUES ({})",
-        table_name,
-        columns.join(", "),
+        dialect.quote_identifier(table_name),
+        quoted_cols.join(", "),
         placeholders.join(", ")
     );
 
@@ -662,10 +679,11 @@ pub async fn generic_insert_bulk(
     let first_item = &items[0];
     let (columns, _, _) = prepare_statement(dialect.as_ref(), first_item)?;
 
+    let quoted_cols: Vec<String> = columns.iter().map(|c| dialect.quote_identifier(c)).collect();
     let mut sql = format!(
         "INSERT INTO {} ({}) VALUES ",
-        table_name,
-        columns.join(", ")
+        dialect.quote_identifier(table_name),
+        quoted_cols.join(", ")
     );
 
     let mut placeholders = Vec::new();
@@ -760,7 +778,7 @@ pub async fn generic_query(
         validate_identifier(col)?;
     }
 
-    let (sql, values) = dialect.build_select(table_name, &columns, &filter_vec, limit);
+    let (sql, values) = dialect.build_select(table_name, &columns, &filter_vec, limit)?;
 
     CIRCUIT_BREAKER
         .call(|| async {
@@ -823,7 +841,7 @@ pub async fn generic_select_in(
     }
     let dialect_type = SqlDialect::from_url(url);
     let dialect = dialect_type.to_dialect();
-    let (sql, _) = dialect.build_select_in(table_name, column, ids.len());
+    let (sql, _) = dialect.build_select_in(table_name, column, ids.len())?;
     let start = Instant::now();
     let mut query = sqlx::query(&sql);
     for id in ids {
@@ -878,7 +896,7 @@ pub fn query_lazy(
     let columns = fields.unwrap_or_default();
     let filter_vec: Vec<(String, QueryValue)> = filters.into_iter().collect();
 
-    let (sql, values) = dialect.build_select(table_name, &columns, &filter_vec, limit);
+    let (sql, values) = dialect.build_select(table_name, &columns, &filter_vec, limit)?;
 
     let pool_clone = pool.clone();
     let stream = futures::stream::once(async move {

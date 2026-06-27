@@ -48,6 +48,7 @@ optional = true
 
 [features]
 default = []
+allow-raw-sql = []
 data-science = ["arrow", "arrow-ipc"]
 java-interop = ["jni"]
 
