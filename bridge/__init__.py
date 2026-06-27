@@ -28,9 +28,17 @@ async def connect(url: str):
     """Initialise the database connection pool."""
     return await bridge_rs.connect(url)
 
-async def execute_raw(sql: str):
-    """Execute raw SQL statement."""
-    return await bridge_rs.execute_raw(sql)
+if hasattr(bridge_rs, "execute_raw"):
+    async def execute_raw(sql: str):
+        """Execute raw SQL statement (requires Cargo feature `allow-raw-sql`)."""
+        return await bridge_rs.execute_raw(sql)
+else:
+    async def execute_raw(sql: str):
+        """Execute raw SQL statement (requires Cargo feature `allow-raw-sql`)."""
+        raise RuntimeError(
+            "bridge_rs was compiled without `allow-raw-sql` feature. "
+            "Rebuild with `cargo build --features allow-raw-sql` to use execute_raw."
+        )
 
 
 def configure_logging(level: str = "info", slow_query_ms: int = 100):
