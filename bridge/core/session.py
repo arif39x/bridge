@@ -47,11 +47,10 @@ class Session:
         key = f"{table}:{pk_values}"
         entity = self._rs_session.get_entity(key)
         if entity:
-            # Move to end (most recently used)
-            # Find the model class from registry if needed, but here we just need to move it
-            # We need to know which (model_class, pk_values) it corresponds to.
-            # This is a bit tricky with just the key.
-            pass
+            for cache_key, cached_key in list(self._tracked_entities.items()):
+                if cached_key == key:
+                    self._tracked_entities.move_to_end(cache_key)
+                    break
         return entity
 
     def set_entity(self, model_class: Type["BaseModel"], pk_values: tuple, entity: Any):
