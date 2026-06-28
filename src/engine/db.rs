@@ -72,6 +72,33 @@ pub trait Dialect: Send + Sync {
         );
         Ok((sql, Vec::new()))
     }
+    fn build_many_to_many_select_in(
+        &self,
+        target_table: &str,
+        junction_table: &str,
+        left_key: &str,
+        right_key: &str,
+        id_count: usize,
+    ) -> BridgeResult<(String, Vec<QueryValue>)> {
+        validate_identifier(target_table)?;
+        validate_identifier(junction_table)?;
+        validate_identifier(left_key)?;
+        validate_identifier(right_key)?;
+        let placeholders: Vec<String> = (0..id_count)
+            .map(|i| self.get_placeholder(i))
+            .collect();
+        let sql = format!(
+            "SELECT t.*, j.{left_key} AS __bridge_left_id FROM {target} t \
+             JOIN {junction} j ON t.id = j.{right_key} \
+             WHERE j.{left_key} IN ({placeholders})",
+            target = self.quote_identifier(target_table),
+            junction = self.quote_identifier(junction_table),
+            left_key = self.quote_identifier(left_key),
+            right_key = self.quote_identifier(right_key),
+            placeholders = placeholders.join(", "),
+        );
+        Ok((sql, Vec::new()))
+    }
     fn build_select(
         &self,
         table: &str,
@@ -460,7 +487,7 @@ fn prepare_statement(
 }
 
 /// Helper to bind QueryValue to a query.
-fn bind_query_value<'q>(
+pub(crate) fn bind_query_value<'q>(
     query: sqlx::query::Query<'q, sqlx::Any, sqlx::any::AnyArguments<'q>>,
     value: &'q QueryValue,
 ) -> sqlx::query::Query<'q, sqlx::Any, sqlx::any::AnyArguments<'q>> {

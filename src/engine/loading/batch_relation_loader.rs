@@ -1,36 +1,31 @@
-use crate::engine::db::SqlDialect;
+use crate::engine::db::{bind_query_value, SqlDialect};
+use crate::engine::query::QueryValue;
+use sqlx::any::AnyRow;
+use sqlx::{Column, Row};
 use std::collections::HashMap;
-use tracing::{instrument, span, Level}; // Temporary placeholder for Dialect trait
-                                        // use crate::engine::identity_map::SharedIdentityMap; // Not yet implemented
+use std::sync::Arc;
+use tokio::sync::Mutex;
+use tracing::instrument;
 
-// WHY: The loader is decoupled from the session so it can be unit-tested
-// without a live database. It receives everything it needs as arguments.
 pub struct BatchRelationLoader<'dialect> {
     dialect: &'dialect SqlDialect,
-    // identity_map: SharedIdentityMap, // Not yet implemented
 }
 
 impl<'dialect> BatchRelationLoader<'dialect> {
-    pub fn new(
-        dialect: &'dialect SqlDialect,
-        // identity_map: SharedIdentityMap,
-    ) -> Self {
+    pub fn new(dialect: &'dialect SqlDialect) -> Self {
         Self { dialect }
     }
 
-    /// Loads to-many relations for an entire collection of parent IDs in a
-    /// single database round-trip by emitting SELECT ... WHERE pk IN (...).
-    ///
-    /// WHY: A single IN-clause query is O(1) round-trips regardless of how
-    /// many parent rows exist. The naive per-row approach is O(N) round-trips.
+    /// Loads one-to-many relations for a collection of parent IDs using
+    /// SELECT * FROM child_table WHERE foreign_key_column IN (...).
     #[instrument(
-        name = "batch_loader.select_in_for_to_many",
+        name = "batch_loader.load_to_many_relations",
         fields(
             parent_table  = %parent_table,
             related_table = %related_table,
             parent_id_count = parent_ids.len()
         ),
-        skip(self, parent_ids)
+        skip(self, parent_ids, pool, tx)
     )]
     pub async fn load_to_many_relations(
         &self,
@@ -38,35 +33,80 @@ impl<'dialect> BatchRelationLoader<'dialect> {
         related_table: &str,
         foreign_key_column: &str,
         parent_ids: &[String],
+        pool: &sqlx::AnyPool,
+        tx: Option<&Arc<Mutex<Option<sqlx::Transaction<'static, sqlx::Any>>>>>,
     ) -> Result<HashMap<String, Vec<serde_json::Value>>, BatchLoaderError> {
-        // Guard: an empty parent set means no query should be issued.
-        // WHY: Sending SELECT ... IN () is a syntax error in most dialects.
         if parent_ids.is_empty() {
             return Ok(HashMap::new());
         }
 
-        // let query = self.dialect.build_select_in_query(
-        //     related_table,
-        //     foreign_key_column,
-        //     parent_ids,
-        // )?;
+        let dialect = self.dialect.to_dialect();
+        let (sql, _) = dialect.build_select_in(related_table, foreign_key_column, parent_ids.len())
+            .map_err(|e| BatchLoaderError::DialectQueryBuildFailure {
+                reason: e.to_string(),
+            })?;
 
-        // let raw_rows = self.execute_read_query(&query).await?;
+        let values: Vec<QueryValue> = parent_ids
+            .iter()
+            .map(|id| QueryValue::String(id.clone()))
+            .collect();
 
-        // Mocking behavior for now until dialect trait and execution are in place
-        let raw_rows: Vec<serde_json::Value> = Vec::new();
+        let raw_rows = self.execute_read_query(&sql, &values, pool, tx).await?;
 
-        // Group children by their parent FK value so callers can
-        // hydrate each parent object without a secondary scan.
-        let grouped = self.group_rows_by_foreign_key(raw_rows, foreign_key_column);
+        Ok(self.group_rows_by_foreign_key(raw_rows, foreign_key_column))
+    }
 
-        Ok(grouped)
+    /// Loads many-to-many relations for a collection of parent IDs using
+    /// SELECT t.*, j.left_key AS __bridge_left_id FROM target t
+    /// JOIN junction j ON t.id = j.right_key WHERE j.left_key IN (...).
+    #[instrument(
+        name = "batch_loader.load_many_to_many_relations",
+        fields(
+            parent_id_count = parent_ids.len()
+        ),
+        skip(self, parent_ids, pool, tx)
+    )]
+    pub async fn load_many_to_many_relations(
+        &self,
+        target_table: &str,
+        junction_table: &str,
+        left_key: &str,
+        right_key: &str,
+        parent_ids: &[String],
+        pool: &sqlx::AnyPool,
+        tx: Option<&Arc<Mutex<Option<sqlx::Transaction<'static, sqlx::Any>>>>>,
+    ) -> Result<HashMap<String, Vec<serde_json::Value>>, BatchLoaderError> {
+        if parent_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+
+        let dialect = self.dialect.to_dialect();
+        let (sql, _) = dialect
+            .build_many_to_many_select_in(
+                target_table,
+                junction_table,
+                left_key,
+                right_key,
+                parent_ids.len(),
+            )
+            .map_err(|e| BatchLoaderError::DialectQueryBuildFailure {
+                reason: e.to_string(),
+            })?;
+
+        let values: Vec<QueryValue> = parent_ids
+            .iter()
+            .map(|id| QueryValue::String(id.clone()))
+            .collect();
+
+        let raw_rows = self.execute_read_query(&sql, &values, pool, tx).await?;
+
+        Ok(self.group_rows_by_foreign_key(raw_rows, "__bridge_left_id"))
     }
 
     /// Groups a flat list of rows into a map keyed by the foreign key value.
     /// WHY: Kept as a separate method so it can be unit-tested without any
     /// database involvement — pure data transformation, no side effects.
-    fn group_rows_by_foreign_key(
+    pub fn group_rows_by_foreign_key(
         &self,
         rows: Vec<serde_json::Value>,
         foreign_key_column: &str,
@@ -82,14 +122,64 @@ impl<'dialect> BatchRelationLoader<'dialect> {
         grouped
     }
 
-    async fn execute_read_query(
+    /// Executes a parameterized read query through the dialect system and
+    /// sqlx, returning the result rows as JSON values.
+    pub async fn execute_read_query(
         &self,
-        query: &str,
+        sql: &str,
+        values: &[QueryValue],
+        pool: &sqlx::AnyPool,
+        tx: Option<&Arc<Mutex<Option<sqlx::Transaction<'static, sqlx::Any>>>>>,
     ) -> Result<Vec<serde_json::Value>, BatchLoaderError> {
-        // Actual DB execution delegated to the engine layer.
-        // Tracing span is inherited from the calling instrument macro above.
-        todo!("delegate to engine::db::execute_read_query(query)")
+        let mut query = sqlx::query(sql);
+        for val in values {
+            query = bind_query_value(query, val);
+        }
+
+        let rows: Vec<AnyRow> = if let Some(tx_mutex) = tx {
+            let mut tx_guard = tx_mutex.lock().await;
+            let tx_conn = tx_guard.as_mut().ok_or_else(|| {
+                BatchLoaderError::DatabaseExecutionFailure {
+                    reason: "Transaction already closed".to_string(),
+                }
+            })?;
+            query.fetch_all(&mut **tx_conn).await.map_err(|e| {
+                BatchLoaderError::DatabaseExecutionFailure {
+                    reason: e.to_string(),
+                }
+            })?
+        } else {
+            query.fetch_all(pool).await.map_err(|e| {
+                BatchLoaderError::DatabaseExecutionFailure {
+                    reason: e.to_string(),
+                }
+            })?
+        };
+
+        Ok(rows.iter().map(any_row_to_json).collect())
     }
+}
+
+/// Converts an sqlx AnyRow to a serde_json::Value by iterating over columns
+/// and attempting type-appropriate extraction.
+fn any_row_to_json(row: &AnyRow) -> serde_json::Value {
+    let mut map = serde_json::Map::new();
+    for column in row.columns() {
+        let name = column.name();
+        let value = if let Ok(v) = row.try_get::<String, _>(name) {
+            serde_json::Value::String(v)
+        } else if let Ok(v) = row.try_get::<i64, _>(name) {
+            serde_json::json!(v)
+        } else if let Ok(v) = row.try_get::<f64, _>(name) {
+            serde_json::json!(v)
+        } else if let Ok(v) = row.try_get::<bool, _>(name) {
+            serde_json::json!(v)
+        } else {
+            serde_json::Value::Null
+        };
+        map.insert(name.to_string(), value);
+    }
+    serde_json::Value::Object(map)
 }
 
 #[derive(Debug, thiserror::Error)]
