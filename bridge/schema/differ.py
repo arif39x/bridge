@@ -12,8 +12,9 @@ class CreateTable(DiffOp):
 
 
 class DropTable(DiffOp):
-    def __init__(self, table_name: str):
-        self.table_name = table_name
+    def __init__(self, table: TableSnapshot):
+        self.table = table
+        self.table_name = table.name
 
 
 class RenameTable(DiffOp):
@@ -29,9 +30,10 @@ class AddColumn(DiffOp):
 
 
 class DropColumn(DiffOp):
-    def __init__(self, table_name: str, column_name: str):
+    def __init__(self, table_name: str, column: ColumnSnapshot):
         self.table_name = table_name
-        self.column_name = column_name
+        self.column = column
+        self.column_name = column.name
 
 
 class RenameColumn(DiffOp):
@@ -69,7 +71,7 @@ def diff(old_schema: SchemaSnapshot, new_schema: SchemaSnapshot) -> List[DiffOp]
     # Detect Dropped Tables
     for old_id, old_table in old_tables_by_id.items():
         if old_id not in new_tables_by_id:
-            ops.append(DropTable(old_table.name))
+            ops.append(DropTable(old_table))
 
     return ops
 
@@ -96,6 +98,6 @@ def _diff_columns(old_table: TableSnapshot, new_table: TableSnapshot) -> List[Di
     # Detect Dropped Columns
     for old_id, old_col in old_cols_by_id.items():
         if old_id not in new_cols_by_id:
-            ops.append(DropColumn(new_table.name, old_col.name))
+            ops.append(DropColumn(new_table.name, old_col))
 
     return ops

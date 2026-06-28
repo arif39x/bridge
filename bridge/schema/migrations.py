@@ -139,9 +139,14 @@ class MigrationEngine:
             return up, down
 
         if isinstance(op, DropTable):
-            # This is tricky because i don't have the full table definition for 'down' easily here
             up = f"DROP TABLE {op.table_name};"
-            down = f"-- TODO: Manual recovery for DROP TABLE {op.table_name}"
+            col_defs = []
+            for col in op.table.columns.values():
+                sql_type = bridge_rs.resolve_type(col.data_type, self.dialect)
+                if col.is_primary_key:
+                    sql_type += " PRIMARY KEY"
+                col_defs.append(f"  {col.name} {sql_type}")
+            down = f"CREATE TABLE {op.table_name} (\n" + ",\n".join(col_defs) + "\n);"
             return up, down
 
         if isinstance(op, RenameTable):
@@ -161,7 +166,8 @@ class MigrationEngine:
 
         if isinstance(op, DropColumn):
             up = f"ALTER TABLE {op.table_name} DROP COLUMN {op.column_name};"
-            down = f"-- TODO: Manual recovery for DROP COLUMN {op.column_name}"
+            sql_type = bridge_rs.resolve_type(op.column.data_type, self.dialect)
+            down = f"ALTER TABLE {op.table_name} ADD COLUMN {op.column.name} {sql_type};"
             return up, down
 
         if isinstance(op, RenameColumn):
