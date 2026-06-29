@@ -8,7 +8,7 @@ from ..common.exceptions import DatabaseError, ValidationError
 
 
 class EagerLoadingStrategy(Enum):
-    # WHY: Explicit enum prevents callers from passing magic strings like
+    # Explicit enum prevents callers from passing magic strings like
     # "joined" or "select_in" that would silently degrade to a default.
     JOINED_FOR_TO_ONE = auto()
     SELECT_IN_FOR_TO_MANY = auto()
@@ -22,12 +22,14 @@ class EagerLoadRequest:
     WHY: Using a dataclass instead of a raw dict forces callers to be
     explicit about strategy — the compiler/type-checker enforces intent.
     """
+
     relation_name: str
     strategy: EagerLoadingStrategy
 
 
 class Raw:
     """Wrapper for raw SQL expressions with bound parameters."""
+
     __slots__ = ("sql", "params")
 
     def __init__(self, sql: str, *params: Any) -> None:
@@ -39,7 +41,14 @@ class QueryBuilder:
     # Fluent interface for building and executing database queries.
     # Rule: Use __slots__ on hot-path classes.
 
-    __slots__ = ("model_class", "_filters", "_raw_filters", "_limit", "_projection", "_eager_load_requests")
+    __slots__ = (
+        "model_class",
+        "_filters",
+        "_raw_filters",
+        "_limit",
+        "_projection",
+        "_eager_load_requests",
+    )
 
     def __init__(self, model_class: Type["BaseModel"]) -> None:
 
@@ -180,7 +189,12 @@ class QueryBuilder:
                 for req in self._eager_load_requests
             ]
             raw_results = await bridge_rs.fetch_all(
-                self.model_class.table, filters, self._limit, self._projection, eager_loads_payload, tx=rs_tx
+                self.model_class.table,
+                filters,
+                self._limit,
+                self._projection,
+                eager_loads_payload,
+                tx=rs_tx,
             )
             instances = []
             for res in raw_results:
@@ -189,17 +203,20 @@ class QueryBuilder:
                     instance._session = tx
                 if self._projection:
                     instance._projected_fields = self._projection
-                
+
                 # Identity Map population
                 if hasattr(tx, "set_entity") and not self._projection:
-                    pk_values = tuple(getattr(instance, k) for k in self.model_class._primary_keys)
+                    pk_values = tuple(
+                        getattr(instance, k) for k in self.model_class._primary_keys
+                    )
                     tx.set_entity(self.model_class, pk_values, instance)
-                
+
                 instances.append(instance)
 
             # Eager loading — batch-fetch relations for all parent instances
             if self._eager_load_requests and instances:
-                from .relations import HasMany, BelongsToMany, SelfReferential
+                from .relations import BelongsToMany, HasMany, SelfReferential
+
                 pk_col = self.model_class._primary_keys[0]
                 parent_ids = [str(getattr(inst, pk_col)) for inst in instances]
 
@@ -209,17 +226,26 @@ class QueryBuilder:
 
                     if isinstance(descriptor, HasMany):
                         grouped = await bridge_rs.batch_fetch_one_to_many(
-                            target_cls.table, descriptor.foreign_key, parent_ids, tx=rs_tx,
+                            target_cls.table,
+                            descriptor.foreign_key,
+                            parent_ids,
+                            tx=rs_tx,
                         )
                     elif isinstance(descriptor, BelongsToMany):
                         grouped = await bridge_rs.batch_fetch_many_to_many(
-                            target_cls.table, descriptor.junction,
-                            descriptor.left_key, descriptor.right_key,
-                            parent_ids, tx=rs_tx,
+                            target_cls.table,
+                            descriptor.junction,
+                            descriptor.left_key,
+                            descriptor.right_key,
+                            parent_ids,
+                            tx=rs_tx,
                         )
                     elif isinstance(descriptor, SelfReferential):
                         grouped = await bridge_rs.batch_fetch_self_ref(
-                            target_cls.table, descriptor.parent_key, parent_ids, tx=rs_tx,
+                            target_cls.table,
+                            descriptor.parent_key,
+                            parent_ids,
+                            tx=rs_tx,
                         )
                     else:
                         continue
@@ -232,7 +258,10 @@ class QueryBuilder:
                             rel_inst = target_cls(**data)
                             if hasattr(tx, "set_entity"):
                                 rel_inst._session = tx
-                                pk_vals = tuple(getattr(rel_inst, k) for k in target_cls._primary_keys)
+                                pk_vals = tuple(
+                                    getattr(rel_inst, k)
+                                    for k in target_cls._primary_keys
+                                )
                                 tx.set_entity(target_cls, pk_vals, rel_inst)
                             related.append(rel_inst)
                         setattr(inst, req.relation_name, related)
@@ -247,9 +276,11 @@ class QueryBuilder:
         Returns LazyModelProxy instances that materialize on access.
         """
         import io
+
         import pyarrow as pa
+
         from .lazy import LazyModelProxy
-        
+
         filters = self._merged_filters()
         try:
             # Handle Session or TxHandle
@@ -257,20 +288,20 @@ class QueryBuilder:
             ipc_bytes = await bridge_rs.fetch_all_arrow(
                 self.model_class.table, filters, self._limit, self._projection, tx=rs_tx
             )
-            
+
             if not ipc_bytes:
                 return []
-                
+
             with pa.ipc.open_stream(io.BytesIO(ipc_bytes)) as reader:
                 batch = reader.read_next_batch()
-                
+
             return [
                 LazyModelProxy(
-                    batch, 
-                    i, 
-                    self.model_class, 
-                    session=tx, 
-                    projected_fields=self._projection
+                    batch,
+                    i,
+                    self.model_class,
+                    session=tx,
+                    projected_fields=self._projection,
                 )
                 for i in range(batch.num_rows)
             ]
@@ -297,10 +328,12 @@ class QueryBuilder:
                 instance._session = tx
             if self._projection:
                 instance._projected_fields = self._projection
-            
+
             # Identity Map population
             if hasattr(tx, "set_entity") and not self._projection:
-                pk_values = tuple(getattr(instance, k) for k in self.model_class._primary_keys)
+                pk_values = tuple(
+                    getattr(instance, k) for k in self.model_class._primary_keys
+                )
                 tx.set_entity(self.model_class, pk_values, instance)
 
             yield instance

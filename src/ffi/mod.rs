@@ -45,10 +45,7 @@ struct PoolTx {
 
 /// Extracts (pool, url, optional tx_mutex) from an optional tx parameter.
 /// If tx is None, falls back to the PoolManager's default pool.
-fn extract_pool_tx(
-    py: Python<'_>,
-    tx: Option<&PyObject>,
-) -> PyResult<PoolTx> {
+fn extract_pool_tx(py: Python<'_>, tx: Option<&PyObject>) -> PyResult<PoolTx> {
     if let Some(tx_obj) = tx {
         if let Ok(session) = tx_obj.extract::<engine::session::Session>(py) {
             return Ok(PoolTx {
@@ -96,47 +93,43 @@ fn bridge_error_to_py(err: BridgeError) -> PyErr {
 
 use crate::engine::query::QueryValue;
 
-fn query_value_to_py(py: Python<'_>, v: QueryValue) -> PyObject {
+fn query_value_to_py(py: Python<'_>, v: QueryValue) -> PyResult<PyObject> {
     match v {
-        QueryValue::String(s) => s.to_object(py),
-        QueryValue::Int(i) => i.to_object(py),
-        QueryValue::Float(f) => f.to_object(py),
-        QueryValue::Bool(b) => b.to_object(py),
+        QueryValue::String(s) => Ok(s.to_object(py)),
+        QueryValue::Int(i) => Ok(i.to_object(py)),
+        QueryValue::Float(f) => Ok(f.to_object(py)),
+        QueryValue::Bool(b) => Ok(b.to_object(py)),
         QueryValue::Uuid(u) => {
-            let uuid_module = py.import_bound("uuid").unwrap();
-            let uuid_obj = uuid_module.call_method1("UUID", (u.to_string(),)).unwrap();
-            uuid_obj.to_object(py)
+            let uuid_module = py.import_bound("uuid")?;
+            let uuid_obj = uuid_module.call_method1("UUID", (u.to_string(),))?;
+            Ok(uuid_obj.to_object(py))
         }
         QueryValue::DateTime(dt) => {
-            let datetime_module = py.import_bound("datetime").unwrap();
-            let datetime_cls = datetime_module.getattr("datetime").unwrap();
-            let dt_obj = datetime_cls
-                .call_method1("fromisoformat", (dt.to_rfc3339(),))
-                .unwrap();
-            dt_obj.to_object(py)
+            let datetime_module = py.import_bound("datetime")?;
+            let datetime_cls = datetime_module.getattr("datetime")?;
+            let dt_obj = datetime_cls.call_method1("fromisoformat", (dt.to_rfc3339(),))?;
+            Ok(dt_obj.to_object(py))
         }
         QueryValue::Json(j) => {
             let s = j.to_string();
-            let json_module = py.import_bound("json").unwrap();
-            json_module
-                .call_method1("loads", (s,))
-                .unwrap()
-                .to_object(py)
+            let json_module = py.import_bound("json")?;
+            let json_obj = json_module.call_method1("loads", (s,))?;
+            Ok(json_obj.to_object(py))
         }
-        QueryValue::Bytes(b) => b.to_object(py),
+        QueryValue::Bytes(b) => Ok(b.to_object(py)),
         #[cfg(feature = "allow-raw-sql")]
         QueryValue::Raw(raw) => {
             let dict = PyDict::new_bound(py);
-            dict.set_item("sql", raw.sql).unwrap();
+            dict.set_item("sql", raw.sql)?;
             let params: Vec<PyObject> = raw
                 .params
                 .into_iter()
                 .map(|p| query_value_to_py(py, p))
-                .collect();
-            dict.set_item("params", params).unwrap();
-            dict.to_object(py)
+                .collect::<PyResult<Vec<_>>>()?;
+            dict.set_item("params", params)?;
+            Ok(dict.to_object(py))
         }
-        QueryValue::Null => py.None(),
+        QueryValue::Null => Ok(py.None()),
     }
 }
 
@@ -150,7 +143,12 @@ fn py_to_query_value(
         return Ok(QueryValue::Null);
     }
 
-    let registry_guard = engine::metadata::REGISTRY.read().unwrap();
+    let registry_guard = engine::metadata::REGISTRY.read().map_err(|e| {
+        BridgeError::Internal(
+            format!("Registry lock poisoned: {}", e),
+            DiagnosticInfo::default(),
+        )
+    })?;
     let meta = registry_guard
         .mappings
         .get(table_name)
@@ -199,13 +197,11 @@ fn py_to_query_value(
 
     // Check for Raw expression
     if let Ok(sql_attr) = obj.getattr("sql") {
-        if sql_attr.extract::<String>().is_ok() {
+        if let Ok(sql) = sql_attr.extract::<String>() {
             if let Ok(params_attr) = obj.getattr("params") {
-                if params_attr.extract::<Vec<Bound<'_, PyAny>>>().is_ok() {
+                if let Ok(params_py) = params_attr.extract::<Vec<Bound<'_, PyAny>>>() {
                     #[cfg(feature = "allow-raw-sql")]
                     {
-                        let sql = sql_attr.extract::<String>().unwrap();
-                        let params_py = params_attr.extract::<Vec<Bound<'_, PyAny>>>().unwrap();
                         let mut params = Vec::new();
                         for p in params_py {
                             params.push(py_to_query_value(py, &p, table_name, column_name)?);
@@ -405,7 +401,7 @@ fn insert_row<'py>(
         Python::with_gil(|py| {
             let dict = PyDict::new_bound(py);
             for (k, v) in res {
-                dict.set_item(k, query_value_to_py(py, v))?;
+                dict.set_item(k, query_value_to_py(py, v)?)?;
             }
             Ok(dict.to_object(py))
         })
@@ -689,7 +685,7 @@ fn insert_rows_bulk<'py>(
             for item in res {
                 let dict = PyDict::new_bound(py);
                 for (k, v) in item {
-                    dict.set_item(k, query_value_to_py(py, v))?;
+                    dict.set_item(k, query_value_to_py(py, v)?)?;
                 }
                 results.push(dict.to_object(py));
             }
@@ -828,7 +824,12 @@ fn batch_fetch_one_to_many<'py>(
     let tx_mutex = pt.tx_mutex;
     pyo3_async_runtimes::tokio::future_into_py(py, async move {
         let grouped = engine::relations::batch_fetch_one_to_many(
-            &pool, tx_mutex.as_ref(), &url, &child_table, &foreign_key, &parent_ids,
+            &pool,
+            tx_mutex.as_ref(),
+            &url,
+            &child_table,
+            &foreign_key,
+            &parent_ids,
         )
         .await
         .map_err(bridge_error_to_py)?;
@@ -866,8 +867,14 @@ fn batch_fetch_many_to_many<'py>(
     let tx_mutex = pt.tx_mutex;
     pyo3_async_runtimes::tokio::future_into_py(py, async move {
         let grouped = engine::relations::batch_fetch_many_to_many(
-            &pool, tx_mutex.as_ref(), &url, &target_table, &junction_table,
-            &left_key, &right_key, &parent_ids,
+            &pool,
+            tx_mutex.as_ref(),
+            &url,
+            &target_table,
+            &junction_table,
+            &left_key,
+            &right_key,
+            &parent_ids,
         )
         .await
         .map_err(bridge_error_to_py)?;
@@ -903,7 +910,12 @@ fn batch_fetch_self_ref<'py>(
     let tx_mutex = pt.tx_mutex;
     pyo3_async_runtimes::tokio::future_into_py(py, async move {
         let grouped = engine::relations::batch_fetch_self_ref(
-            &pool, tx_mutex.as_ref(), &url, &table, &parent_key, &parent_ids,
+            &pool,
+            tx_mutex.as_ref(),
+            &url,
+            &table,
+            &parent_key,
+            &parent_ids,
         )
         .await
         .map_err(bridge_error_to_py)?;
@@ -913,8 +925,7 @@ fn batch_fetch_self_ref<'py>(
                 let row_list: Vec<PyObject> = rows
                     .iter()
                     .map(|row| {
-                        engine::hydrator::hydrate_row(py, &table, row)
-                            .map(|d| d.to_object(py))
+                        engine::hydrator::hydrate_row(py, &table, row).map(|d| d.to_object(py))
                     })
                     .collect::<PyResult<Vec<_>>>()?;
                 result_dict.set_item(&parent_id, row_list)?;
