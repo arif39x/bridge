@@ -9,7 +9,8 @@ description = "Secure By Default"
 requires-python = ">=3.8"
 dependencies = [
     "typing-extensions>=4.0; python_version < '3.11'",
-    "pyarrow>=15.0.0"
+    "pyarrow>=15.0.0",
+    "PyJWT>=2.0"
 ]
 
 [project.optional-dependencies]

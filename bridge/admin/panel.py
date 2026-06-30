@@ -1,9 +1,11 @@
+from datetime import datetime, timedelta
 from typing import Type, List, Optional
 from fastapi import FastAPI, APIRouter, Request, Depends, HTTPException
 from fastapi.responses import HTMLResponse
 from ..core.base import BaseModel, _MODEL_REGISTRY
-from .auth import get_current_user, User
+from .auth import get_current_user, User, SECRET_KEY, ALGORITHM
 from .views import router as api_router
+import jwt
 
 class AdminPanel:
     def __init__(self, title: str = "Bridge Admin"):
@@ -22,7 +24,14 @@ class AdminPanel:
             form = await request.form()
             username = form.get("username")
             if username == "admin" or username == "viewer":
-                return {"access_token": f"bridge_token_{username}", "token_type": "bearer"}
+                roles = ["admin"] if username == "admin" else ["viewer"]
+                payload = {
+                    "sub": username,
+                    "roles": roles,
+                    "exp": datetime.utcnow() + timedelta(hours=24),
+                }
+                token = jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
+                return {"access_token": token, "token_type": "bearer"}
             raise HTTPException(status_code=400, detail="Invalid credentials")
 
         @self.router.get("/", response_class=HTMLResponse)
