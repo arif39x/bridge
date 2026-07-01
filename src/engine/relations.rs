@@ -19,8 +19,8 @@ pub async fn fetch_one_to_many(
     let dialect = SqlDialect::from_url(url).to_dialect();
     let sql = format!(
         "SELECT * FROM {} WHERE {} = {}",
-        child_table,
-        foreign_key,
+        dialect.quote_identifier(child_table),
+        dialect.quote_identifier(foreign_key),
         dialect.get_placeholder(0)
     );
 
@@ -62,10 +62,10 @@ pub async fn fetch_many_to_many(
         "SELECT t.* FROM {} t
          JOIN {} j ON t.id = j.{}
          WHERE j.{} = {}",
-        target_table,
-        junction_table,
-        right_key,
-        left_key,
+        dialect.quote_identifier(target_table),
+        dialect.quote_identifier(junction_table),
+        dialect.quote_identifier(right_key),
+        dialect.quote_identifier(left_key),
         dialect.get_placeholder(0)
     );
 
@@ -101,8 +101,8 @@ pub async fn fetch_self_ref(
     let dialect = SqlDialect::from_url(url).to_dialect();
     let sql = format!(
         "SELECT * FROM {} WHERE {} = {}",
-        table,
-        parent_key,
+        dialect.quote_identifier(table),
+        dialect.quote_identifier(parent_key),
         dialect.get_placeholder(0)
     );
 
@@ -169,11 +169,11 @@ pub async fn batch_fetch_many_to_many(
         .collect();
     let sql = format!(
         "SELECT t.*, j.{} AS __bridge_left_id FROM {} t JOIN {} j ON t.id = j.{} WHERE j.{} IN ({})",
-        left_key,
-        target_table,
-        junction_table,
-        right_key,
-        left_key,
+        dialect.quote_identifier(left_key),
+        dialect.quote_identifier(target_table),
+        dialect.quote_identifier(junction_table),
+        dialect.quote_identifier(right_key),
+        dialect.quote_identifier(left_key),
         placeholders.join(", ")
     );
     let mut query = sqlx::query(&sql);
