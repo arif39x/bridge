@@ -23,7 +23,7 @@ const RESERVED_KEYWORDS: [&str; 18] = [
 ];
 
 pub static VALID_SQL_IDENTIFIER_PATTERN: Lazy<Regex> =
-    Lazy::new(|| Regex::new(VALID_IDENTIFIER_REGEX).expect("Invalid hardcoded regex pattern"));
+    Lazy::new(|| Regex::new(VALID_IDENTIFIER_REGEX).expect("Invalid hardcoded identifier regex"));
 
 pub static CIRCUIT_BREAKER: Lazy<crate::engine::circuit_breaker::CircuitBreaker> =
     Lazy::new(|| {
@@ -414,7 +414,12 @@ pub fn validate_query_filters(
     {
         use crate::engine::metadata::REGISTRY;
 
-        let registry_guard = REGISTRY.read().unwrap();
+        let registry_guard = REGISTRY.read().map_err(|e| {
+            BridgeError::Internal(
+                format!("Registry lock poisoned: {}", e),
+                DiagnosticInfo::default(),
+            )
+        })?;
         if let Some(mapping) = registry_guard.mappings.get(table_name) {
             for (col, val) in filters {
                 let meta = mapping.columns.get(col).ok_or_else(|| {
@@ -552,7 +557,9 @@ pub(crate) fn bind_query_value<'q>(
         QueryValue::Json(j) => query.bind(j.to_string()),
         QueryValue::Bytes(b) => query.bind(b),
         #[cfg(feature = "allow-raw-sql")]
-        QueryValue::Raw(_) => panic!("RawExpression should have been expanded before binding"),
+        QueryValue::Raw(raw) => {
+            unreachable!("RawExpression should have been expanded before binding: sql={}", raw.sql)
+        }
         QueryValue::Null => query.bind(None::<String>),
     }
 }
