@@ -34,25 +34,24 @@ impl MetadataRegistry {
 pub static REGISTRY: Lazy<RwLock<MetadataRegistry>> =
     Lazy::new(|| RwLock::new(MetadataRegistry::new()));
 
+fn poison_err() -> PyErr {
+    pyo3::exceptions::PyRuntimeError::new_err("Metadata registry lock poisoned")
+}
+
 #[pyfunction]
 pub fn register_entity(
     table_name: String,
     columns: Vec<(String, String, bool, bool)>,
 ) -> PyResult<()> {
-    let mut registry = REGISTRY.write().unwrap();
+    let mut registry = REGISTRY.write().map_err(|_| poison_err())?;
     if registry.locked {
         return Err(pyo3::exceptions::PyRuntimeError::new_err(
             "Metadata registry is locked. Cannot register new entities after initialization.",
         ));
     }
 
-    println!("DEBUG: Registering entity: {}", table_name);
     let mut col_map = HashMap::new();
     for (name, data_type, is_nullable, is_primary_key) in columns {
-        println!(
-            "DEBUG:   Column: {} (type: {}, nullable: {}, pk: {})",
-            name, data_type, is_nullable, is_primary_key
-        );
         col_map.insert(
             name.clone(),
             ColumnMetadata {
@@ -76,7 +75,7 @@ pub fn register_entity(
 
 #[pyfunction]
 pub fn lock_registry() -> PyResult<()> {
-    let mut registry = REGISTRY.write().unwrap();
+    let mut registry = REGISTRY.write().map_err(|_| poison_err())?;
     registry.locked = true;
     Ok(())
 }
