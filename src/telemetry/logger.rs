@@ -30,8 +30,7 @@ pub fn configure_logging(level: &str, slow_query_ms: u64) {
             .with_max_level(tracing_level)
             .finish();
 
-        tracing::subscriber::set_global_default(subscriber)
-            .expect("setting default subscriber failed");
+        let _ = tracing::subscriber::set_global_default(subscriber);
     });
 
     if let Ok(mut threshold) = SLOW_QUERY_THRESHOLD.write() {
@@ -48,9 +47,7 @@ pub fn set_python_logger(logger: PyObject) {
 /// Dispatches a telemetry event to the registered Python logger.
 /// Rust Spans into Python Telemetry.
 pub fn emit_telemetry(event: TelemetryEvent) {
-    let slow_threshold = *SLOW_QUERY_THRESHOLD
-        .read()
-        .unwrap_or(RwLock::read(&SLOW_QUERY_THRESHOLD).unwrap());
+    let slow_threshold = SLOW_QUERY_THRESHOLD.read().map(|g| *g).unwrap_or(100);
 
     // Rust-side structured logging
     if event.duration_micros > slow_threshold * 1000 {
@@ -62,7 +59,8 @@ pub fn emit_telemetry(event: TelemetryEvent) {
 
     // Python-side bridge
     Python::with_gil(|py| {
-        if let Some(logger) = PYTHON_LOGGER.read().unwrap().as_ref() {
+        if let Ok(guard) = PYTHON_LOGGER.read() {
+        if let Some(logger) = guard.as_ref() {
             let dict = PyDict::new_bound(py);
             let _ = dict.set_item("sql", &event.sql);
             let _ = dict.set_item("duration_micros", event.duration_micros);
@@ -71,6 +69,7 @@ pub fn emit_telemetry(event: TelemetryEvent) {
 
             // Call the Python logger's 'handle_telemetry' method
             let _ = logger.call_method_bound(py, "handle_telemetry", (dict,), None);
+        }
         }
     });
 }
