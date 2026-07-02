@@ -9,16 +9,10 @@ pub fn hydrate_row<'py>(
     table_name: &str,
     row: &AnyRow,
 ) -> PyResult<Bound<'py, PyDict>> {
-    let registry_guard = REGISTRY.read().unwrap();
+    let registry_guard = REGISTRY.read().map_err(|e| {
+        pyo3::exceptions::PyRuntimeError::new_err(format!("Registry lock poisoned: {}", e))
+    })?;
     let mapping = registry_guard.mappings.get(table_name);
-
-    if mapping.is_none() {
-        println!("DEBUG: No mapping found for table: {}", table_name);
-        println!(
-            "DEBUG: Available mappings: {:?}",
-            registry_guard.mappings.keys()
-        );
-    }
 
     let dict = PyDict::new_bound(py);
 
@@ -26,19 +20,9 @@ pub fn hydrate_row<'py>(
         let name = column.name();
         let meta = mapping.and_then(|m| m.columns.get(name));
 
-        println!(
-            "DEBUG: Hydrating column: {} (has_meta: {})",
-            name,
-            meta.is_some()
-        );
-        if let Some(m) = meta {
-            println!("DEBUG:   Meta data_type: {}", m.data_type);
-        }
-
         let val = if let Some(meta) = meta {
             coerce_value(py, row, name, meta)?
         } else {
-            // Fallback for unmapped columns
             let raw_val: String = row.try_get(name).unwrap_or_default();
             raw_val.to_object(py)
         };
@@ -127,11 +111,10 @@ fn coerce_value(
         }
         "json" | "jsonb" => {
             if let Ok(val_str) = row.try_get::<String, _>(name) {
-                let json_module = py.import_bound("json").unwrap();
-                Ok(json_module
-                    .call_method1("loads", (val_str,))
-                    .unwrap()
-                    .to_object(py))
+                let json_module = py.import_bound("json")?;
+                let parsed = json_module
+                    .call_method1("loads", (val_str,))?;
+                Ok(parsed.to_object(py))
             } else {
                 Ok(py.None())
             }
