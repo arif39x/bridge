@@ -1,5 +1,7 @@
+use once_cell::sync::Lazy;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
+use regex::Regex;
 use sqlx::{Any, Transaction};
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -54,9 +56,11 @@ pub async fn begin_transaction(pool: &sqlx::AnyPool, url: &str) -> Result<TxHand
     })
 }
 
+static SAVEPOINT_NAME_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"^[a-zA-Z_][a-zA-Z0-9_]*$").expect("Invalid hardcoded savepoint regex"));
+
 pub fn validate_savepoint_name(name: &str) -> PyResult<()> {
-    let re = regex::Regex::new(r"^[a-zA-Z_][a-zA-Z0-9_]*$").unwrap();
-    if !re.is_match(name) {
+    if !SAVEPOINT_NAME_RE.is_match(name) {
         return Err(PyValueError::new_err("Invalid savepoint name"));
     }
     Ok(())
