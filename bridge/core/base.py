@@ -23,23 +23,15 @@ class BaseModel:
         if cls.table:
             _MODEL_REGISTRY[cls.table] = cls
 
-            try:
-                field_defs = cls.get_field_definitions()
-                columns = []
-                for field in cls._fields:
-                    data_type = field_defs.get(field, "str")
-                    is_nullable = "Optional" in data_type
-                    is_pk = field in cls._primary_keys
-                    columns.append((field, data_type, is_nullable, is_pk))
+            field_defs = cls.get_field_definitions()
+            columns = []
+            for field in cls._fields:
+                data_type = field_defs.get(field, "str")
+                is_nullable = "Optional" in data_type
+                is_pk = field in cls._primary_keys
+                columns.append((field, data_type, is_nullable, is_pk))
 
-                bridge_rs.register_entity(cls.table, columns)
-            except Exception as e:
-                import sys
-
-                print(
-                    f"Warning: Failed to register entity {cls.table} with Rust: {e}",
-                    file=sys.stderr,
-                )
+            bridge_rs.register_entity(cls.table, columns)
 
     @classmethod
     def _get_hooks(cls):
