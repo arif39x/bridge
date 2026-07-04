@@ -3,75 +3,81 @@ use sqlx::AnyPool;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
+struct PoolManagerInner {
+    pools: HashMap<String, AnyPool>,
+    urls: HashMap<String, String>,
+    default_key: Option<String>,
+}
+
 #[derive(Clone)]
 pub struct PoolManager {
-    pools: Arc<RwLock<HashMap<String, AnyPool>>>,
-    urls: Arc<RwLock<HashMap<String, String>>>,
-    default_key: Arc<RwLock<Option<String>>>,
+    inner: Arc<RwLock<PoolManagerInner>>,
 }
 
 impl PoolManager {
     pub fn new() -> Self {
         Self {
-            pools: Arc::new(RwLock::new(HashMap::new())),
-            urls: Arc::new(RwLock::new(HashMap::new())),
-            default_key: Arc::new(RwLock::new(None)),
+            inner: Arc::new(RwLock::new(PoolManagerInner {
+                pools: HashMap::new(),
+                urls: HashMap::new(),
+                default_key: None,
+            })),
         }
     }
 
-    fn poison_err(lock_name: &str) -> BridgeError {
+    fn poison_err() -> BridgeError {
         BridgeError::Internal(
-            format!("Pool manager lock poisoned: {}", lock_name),
+            "Pool manager lock poisoned".into(),
             DiagnosticInfo::default(),
         )
     }
 
     pub fn register(&self, key: String, pool: AnyPool, url: String) -> BridgeResult<()> {
-        let mut pools = self.pools.write().map_err(|_| Self::poison_err("pools"))?;
-        pools.insert(key.clone(), pool);
-        let mut urls = self.urls.write().map_err(|_| Self::poison_err("urls"))?;
-        urls.insert(key, url);
+        let mut guard = self.inner.write().map_err(|_| Self::poison_err())?;
+        guard.pools.insert(key.clone(), pool);
+        guard.urls.insert(key, url);
         Ok(())
     }
 
     pub fn get(&self, key: Option<&str>) -> BridgeResult<Option<(AnyPool, String)>> {
-        let pools = self.pools.read().map_err(|_| Self::poison_err("pools"))?;
-        let urls = self.urls.read().map_err(|_| Self::poison_err("urls"))?;
+        let guard = self.inner.read().map_err(|_| Self::poison_err())?;
         let actual_key = match key {
             Some(k) => k.to_string(),
-            None => match self.default_key.read().map_err(|_| Self::poison_err("default_key"))?.clone() {
-                Some(k) => k,
+            None => match &guard.default_key {
+                Some(k) => k.clone(),
                 None => return Ok(None),
             },
         };
-        match (pools.get(&actual_key), urls.get(&actual_key)) {
+        match (guard.pools.get(&actual_key), guard.urls.get(&actual_key)) {
             (Some(pool), Some(url)) => Ok(Some((pool.clone(), url.clone()))),
             _ => Ok(None),
         }
     }
 
     pub fn set_default(&self, key: String) -> BridgeResult<()> {
-        let mut default = self.default_key.write().map_err(|_| Self::poison_err("default_key"))?;
-        *default = Some(key);
+        let mut guard = self.inner.write().map_err(|_| Self::poison_err())?;
+        guard.default_key = Some(key);
         Ok(())
     }
 
     pub fn get_default_key(&self) -> BridgeResult<Option<String>> {
-        self.default_key.read().map(|g| g.clone()).map_err(|_| Self::poison_err("default_key"))
+        let guard = self.inner.read().map_err(|_| Self::poison_err())?;
+        Ok(guard.default_key.clone())
     }
 
     pub fn remove(&self, key: &str) -> BridgeResult<()> {
-        self.pools.write().map_err(|_| Self::poison_err("pools"))?.remove(key);
-        self.urls.write().map_err(|_| Self::poison_err("urls"))?.remove(key);
-        let mut default = self.default_key.write().map_err(|_| Self::poison_err("default_key"))?;
-        if default.as_deref() == Some(key) {
-            *default = None;
+        let mut guard = self.inner.write().map_err(|_| Self::poison_err())?;
+        guard.pools.remove(key);
+        guard.urls.remove(key);
+        if guard.default_key.as_deref() == Some(key) {
+            guard.default_key = None;
         }
         Ok(())
     }
 
     pub fn contains(&self, key: &str) -> BridgeResult<bool> {
-        self.pools.read().map(|g| g.contains_key(key)).map_err(|_| Self::poison_err("pools"))
+        let guard = self.inner.read().map_err(|_| Self::poison_err())?;
+        Ok(guard.pools.contains_key(key))
     }
 }
 
