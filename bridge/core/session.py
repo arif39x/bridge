@@ -24,9 +24,11 @@ class Session:
     async def commit(self):
         self._check_lifetime()
         await self.flush()
+        self._check_lifetime()
         await self._rs_session.commit()
 
     async def rollback(self):
+        self._check_lifetime()
         await self._rs_session.rollback()
 
     async def flush(self):
@@ -42,6 +44,7 @@ class Session:
                     dirty_data.append((key, model_class.table, current_values, pk_filters))
         
         if dirty_data:
+            self._check_lifetime()
             await bridge_rs.flush(self._rs_session, dirty_data)
 
     def get_entity(self, table: str, pk_values: tuple) -> Optional[Any]:
