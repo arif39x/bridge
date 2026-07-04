@@ -1,4 +1,5 @@
 import bridge_rs
+from threading import Lock
 from typing import Any, Dict, Optional, Type
 from collections import OrderedDict
 import time
@@ -10,6 +11,7 @@ class Session:
         self._rs_session = rs_session
         # (model_class, pk_values) -> key
         self._tracked_entities = OrderedDict()
+        self._lock = Lock()
         self._cache_size = cache_size
         self._evictions = 0
         self._created_at = time.time()
@@ -31,13 +33,13 @@ class Session:
         """Computes changes and executes SQL UPDATEs."""
         self._check_lifetime()
         dirty_data = []
-        for (model_class, pk_values), key in self._tracked_entities.items():
-            entity = self._rs_session.get_entity(key)
-            if entity:
-                # Prepare data for Rust diffing
-                current_values = entity.to_dict()
-                pk_filters = {k: getattr(entity, k) for k in model_class._primary_keys}
-                dirty_data.append((key, model_class.table, current_values, pk_filters))
+        with self._lock:
+            for (model_class, pk_values), key in self._tracked_entities.items():
+                entity = self._rs_session.get_entity(key)
+                if entity:
+                    current_values = entity.to_dict()
+                    pk_filters = {k: getattr(entity, k) for k in model_class._primary_keys}
+                    dirty_data.append((key, model_class.table, current_values, pk_filters))
         
         if dirty_data:
             await bridge_rs.flush(self._rs_session, dirty_data)
@@ -47,53 +49,54 @@ class Session:
         key = f"{table}:{pk_values}"
         entity = self._rs_session.get_entity(key)
         if entity:
-            for cache_key, cached_key in list(self._tracked_entities.items()):
-                if cached_key == key:
-                    self._tracked_entities.move_to_end(cache_key)
-                    break
+            with self._lock:
+                for cache_key, cached_key in list(self._tracked_entities.items()):
+                    if cached_key == key:
+                        self._tracked_entities.move_to_end(cache_key)
+                        break
         return entity
 
     def set_entity(self, model_class: Type["BaseModel"], pk_values: tuple, entity: Any):
         self._check_lifetime()
         key = f"{model_class.table}:{pk_values}"
-        
-        # If already tracked, move to end
-        cache_key = (model_class, pk_values)
-        if cache_key in self._tracked_entities:
-            self._tracked_entities.move_to_end(cache_key)
-        else:
-            # Add to tracker
-            self._tracked_entities[cache_key] = key
-            
-            # Check for eviction
-            if len(self._tracked_entities) > self._cache_size:
-                oldest_key, oldest_rs_key = self._tracked_entities.popitem(last=False)
-                self._rs_session.remove_entity(oldest_rs_key)
-                self._evictions += 1
+
+        with self._lock:
+            cache_key = (model_class, pk_values)
+            if cache_key in self._tracked_entities:
+                self._tracked_entities.move_to_end(cache_key)
+            else:
+                self._tracked_entities[cache_key] = key
+                if len(self._tracked_entities) > self._cache_size:
+                    oldest_key, oldest_rs_key = self._tracked_entities.popitem(last=False)
+                    self._rs_session.remove_entity(oldest_rs_key)
+                    self._evictions += 1
 
         self._rs_session.set_entity(key, entity)
-        
-        # Take initial snapshot in Rust if it's a new or freshly loaded entity
         bridge_rs.snapshot_entity(self._rs_session, key, model_class.table, entity.to_dict())
 
     def remove_entity(self, model_class: Type["BaseModel"], pk_values: tuple):
-        cache_key = (model_class, pk_values)
-        key = self._tracked_entities.pop(cache_key, None)
+        with self._lock:
+            cache_key = (model_class, pk_values)
+            key = self._tracked_entities.pop(cache_key, None)
         if key:
             self._rs_session.remove_entity(key)
 
     def clear(self):
         """Clears all tracked entities and snapshots."""
-        self._tracked_entities.clear()
+        with self._lock:
+            self._tracked_entities.clear()
+            self._evictions = 0
         self._rs_session.clear_identity_map()
-        self._evictions = 0
 
     def get_stats(self) -> Dict[str, Any]:
         rs_stats = self._rs_session.get_stats()
+        with self._lock:
+            identity_map_size = len(self._tracked_entities)
+            evictions = self._evictions
         return {
-            "identity_map_size": len(self._tracked_entities),
+            "identity_map_size": identity_map_size,
             "cache_size": self._cache_size,
-            "evictions": self._evictions,
+            "evictions": evictions,
             "rs_stats": rs_stats,
             "lifetime_seconds": time.time() - self._created_at
         }
