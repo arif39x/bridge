@@ -8,6 +8,6 @@ async def transaction():
     try:
         yield session
         await session.commit()
-    except Exception as e:
+    except BaseException:
         await session.rollback()
-        raise e
+        raise

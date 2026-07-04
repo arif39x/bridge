@@ -267,7 +267,7 @@ class QueryBuilder:
                         setattr(inst, req.relation_name, related)
 
             return instances
-        except Exception as e:
+        except (RuntimeError, ValueError, KeyError) as e:
             raise DatabaseError(f"Fetch failed: {e}") from e
 
     async def fetch_arrow(self, tx: Any = None) -> List[Any]:
@@ -305,7 +305,7 @@ class QueryBuilder:
                 )
                 for i in range(batch.num_rows)
             ]
-        except Exception as e:
+        except (RuntimeError, ValueError, KeyError) as e:
             raise DatabaseError(f"Arrow fetch failed: {e}") from e
 
     async def fetch_lazy(self, tx: Any = None) -> AsyncIterator[Any]:

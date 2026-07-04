@@ -55,7 +55,7 @@ async def main():
                 import models
             elif os.path.exists("bridge/models.py"):
                 from . import models
-        except Exception as e:
+        except (ImportError, SyntaxError, FileNotFoundError) as e:
             print(f"Warning: Failed to auto-discover models: {e}")
 
         engine = MigrationEngine(dialect=args.dialect)
@@ -86,7 +86,7 @@ async def main():
                     await execute_raw(
                         f"INSERT INTO _bridge_migrations (name) VALUES ('{escaped}')"
                     )
-            except Exception as e:
+            except (OSError, RuntimeError, ValueError, KeyError) as e:
                 if "UNIQUE constraint failed" in str(e):
                     continue  # Already applied
                 print(f"Error applying {f}: {e}")

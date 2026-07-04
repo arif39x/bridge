@@ -2,6 +2,7 @@ from typing import Any, List, Optional, Set, Type
 
 from fastapi import APIRouter, Depends, HTTPException
 
+from ..common import HookAbortedError
 from ..core.base import BaseModel
 
 
@@ -22,20 +23,19 @@ def generate_router(
 
     @router.get("/{item_id}", response_model=dict)
     async def get_item(item_id: str):
-        try:
-            item = await model_class.find_one(id=item_id)
-            return item.to_dict()
-        except Exception:
+        item = await model_class.find_one(id=item_id)
+        if item is None:
             raise HTTPException(
                 status_code=404, detail=f"{model_class.__name__} not found"
             )
+        return item.to_dict()
 
     @router.post("/", response_model=dict, status_code=201)
     async def create_item(data: dict):
         try:
             item = await model_class.create(**data)
             return item.to_dict()
-        except Exception as e:
+        except (ValueError, HookAbortedError) as e:
             raise HTTPException(status_code=400, detail=str(e))
 
     return router
