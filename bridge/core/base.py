@@ -251,14 +251,6 @@ class BaseModel:
         for k, v in kwargs.items():
             setattr(self, k, v)
 
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert the model instance to a dictionary of its fields."""
-        return {
-            field: getattr(self, field)
-            for field in self._fields
-            if hasattr(self, field)
-        }
-
     def __getattr__(self, name: str) -> Any:
         if self._projected_fields is not None and name in self._fields:
             if name not in self._projected_fields:
@@ -273,8 +265,8 @@ class BaseModel:
 
     def to_dict(self) -> Dict[str, Any]:
         if self._projected_fields:
-            return {f: getattr(self, f, None) for f in self._projected_fields}
-        return {f: getattr(self, f, None) for f in self._fields}
+            return {f: getattr(self, f) for f in self._projected_fields}
+        return {f: getattr(self, f) for f in self._fields}
 
     def to_json(self, indent: Optional[int] = None) -> str:
         # Serialize model instance to JSON.

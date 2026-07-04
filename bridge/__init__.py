@@ -56,13 +56,6 @@ class User(BaseModel):
     created_at: str
     updated_at: str
 
-    async def load_related(self, model_class):
-        # Using the new generic relation fetcher logic if needed, 
-        # but modern code should use RelationDescriptors.
-        if model_class.__name__ == "Post":
-            return await bridge_rs.fetch_one_to_many("posts", "user_id", str(self.id))
-        return []
-
 class Post(BaseModel):
     table = "posts"
     _fields = ["id", "title", "user_id", "created_at", "updated_at"]

@@ -139,29 +139,6 @@ class QueryBuilder:
             )
         return self
 
-    def _build_query_ast_payload(self) -> dict:
-        """
-        Converts internal builder state to a JSON-serialisable dict that
-        the Rust Query AST compiler understands.
-
-        WHY: Isolated as a private method so it can be tested independently
-        without triggering a real database call.
-        """
-        return {
-            "table": self.model_class.table,
-            "filters": self._merged_filters(),
-            "raw_filters": dict(self._raw_filters),
-            "limit": self._limit,
-            "projection": self._projection,
-            "eager_loads": [
-                {
-                    "relation_name": request.relation_name,
-                    "strategy": request.strategy.name,
-                }
-                for request in self._eager_load_requests
-            ],
-        }
-
     def _merged_filters(self) -> Dict[str, Any]:
         filters = dict(self._filters)
         filters.update(self._raw_filters)
