@@ -2,7 +2,7 @@ import json
 import os
 import uuid
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Type
+from typing import Any, Dict, List, Optional, Tuple, Type
 
 import bridge_rs
 
@@ -186,4 +186,4 @@ class MigrationEngine:
             down = f"ALTER TABLE {op.table_name} ALTER COLUMN {op.new_column.name} {old_type};"
             return up, down
 
-        return "-- Unknown OP", "-- Unknown OP"
+        raise ValueError(f"Unknown diff operation: {type(op).__name__}")
