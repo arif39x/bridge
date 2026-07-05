@@ -10,25 +10,26 @@ from ..core import _MODEL_REGISTRY
 from .snapshot import SchemaSnapshot, TableSnapshot, ColumnSnapshot
 from .differ import diff, CreateTable, DropTable, RenameTable, AddColumn, DropColumn, RenameColumn, AlterColumn
 
-MIGRATIONS_DIR = "migrations"
-SCHEMA_SNAPSHOT_PATH = os.path.join(MIGRATIONS_DIR, "schema_snapshot.json")
+MIGRATIONS_DIR = os.environ.get("BRIDGE_MIGRATIONS_DIR", "migrations")
 
 
 class MigrationEngine:
-    def __init__(self, dialect: str = "sqlite"):
+    def __init__(self, dialect: str = "sqlite", migrations_dir: Optional[str] = None):
         self.dialect = dialect
-        if not os.path.exists(MIGRATIONS_DIR):
-            os.makedirs(MIGRATIONS_DIR)
+        self._migrations_dir = migrations_dir or MIGRATIONS_DIR
+        self._snapshot_path = os.path.join(self._migrations_dir, "schema_snapshot.json")
+        if not os.path.exists(self._migrations_dir):
+            os.makedirs(self._migrations_dir)
 
     def load_snapshot(self) -> SchemaSnapshot:
-        if os.path.exists(SCHEMA_SNAPSHOT_PATH):
-            with open(SCHEMA_SNAPSHOT_PATH, "r") as f:
+        if os.path.exists(self._snapshot_path):
+            with open(self._snapshot_path, "r") as f:
                 data = json.load(f)
                 return SchemaSnapshot.from_dict(data)
         return SchemaSnapshot(tables={})
 
     def save_snapshot(self, snapshot: SchemaSnapshot):
-        with open(SCHEMA_SNAPSHOT_PATH, "w") as f:
+        with open(self._snapshot_path, "w") as f:
             json.dump(snapshot.to_dict(), f, indent=4)
 
     async def _ensure_migration_table(self):
@@ -108,10 +109,10 @@ class MigrationEngine:
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"{timestamp}_{description}.sql"
-        filepath = os.path.join(MIGRATIONS_DIR, filename)
+        filepath = os.path.join(self._migrations_dir, filename)
 
         down_filename = f"{timestamp}_{description}_down.sql"
-        down_filepath = os.path.join(MIGRATIONS_DIR, down_filename)
+        down_filepath = os.path.join(self._migrations_dir, down_filename)
 
         with open(filepath, "w") as f:
             f.write(f"-- UP Migration: {description}\n")
