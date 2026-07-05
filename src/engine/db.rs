@@ -546,21 +546,22 @@ fn prepare_statement(
 pub(crate) fn bind_query_value<'q>(
     query: sqlx::query::Query<'q, sqlx::Any, sqlx::any::AnyArguments<'q>>,
     value: &'q QueryValue,
-) -> sqlx::query::Query<'q, sqlx::Any, sqlx::any::AnyArguments<'q>> {
+) -> BridgeResult<sqlx::query::Query<'q, sqlx::Any, sqlx::any::AnyArguments<'q>>> {
     match value {
-        QueryValue::String(s) => query.bind(s),
-        QueryValue::Int(i) => query.bind(i),
-        QueryValue::Float(f) => query.bind(f),
-        QueryValue::Bool(b) => query.bind(b),
-        QueryValue::Uuid(u) => query.bind(u.to_string()),
-        QueryValue::DateTime(dt) => query.bind(dt.to_rfc3339()),
-        QueryValue::Json(j) => query.bind(j.to_string()),
-        QueryValue::Bytes(b) => query.bind(b),
+        QueryValue::String(s) => Ok(query.bind(s)),
+        QueryValue::Int(i) => Ok(query.bind(i)),
+        QueryValue::Float(f) => Ok(query.bind(f)),
+        QueryValue::Bool(b) => Ok(query.bind(b)),
+        QueryValue::Uuid(u) => Ok(query.bind(u.to_string())),
+        QueryValue::DateTime(dt) => Ok(query.bind(dt.to_rfc3339())),
+        QueryValue::Json(j) => Ok(query.bind(j.to_string())),
+        QueryValue::Bytes(b) => Ok(query.bind(b)),
         #[cfg(feature = "allow-raw-sql")]
-        QueryValue::Raw(raw) => {
-            unreachable!("RawExpression should have been expanded before binding: sql={}", raw.sql)
-        }
-        QueryValue::Null => query.bind(None::<String>),
+        QueryValue::Raw(raw) => Err(BridgeError::Runtime(
+            format!("RawExpression should have been expanded before binding: sql={}", raw.sql),
+            DiagnosticInfo::default(),
+        )),
+        QueryValue::Null => Ok(query.bind(None::<String>)),
     }
 }
 
@@ -648,7 +649,7 @@ pub async fn generic_update(
 
     let mut query = sqlx::query(&sql);
     for val in &values {
-        query = bind_query_value(query, val);
+        query = bind_query_value(query, val)?;
     }
 
     if let Some(tx_mutex) = tx {
@@ -727,7 +728,7 @@ pub async fn generic_delete(
     let start = Instant::now();
     let mut query = sqlx::query(&sql);
     for val in &values {
-        query = bind_query_value(query, val);
+        query = bind_query_value(query, val)?;
     }
 
     if let Some(tx_mutex) = tx {
@@ -827,7 +828,7 @@ pub async fn generic_insert(
     let start = Instant::now();
     let mut query = sqlx::query(&sql);
     for val in &values {
-        query = bind_query_value(query, val);
+        query = bind_query_value(query, val)?;
     }
 
     if let Some(tx_mutex) = tx {
@@ -925,7 +926,7 @@ pub async fn generic_insert_bulk(
     let start = Instant::now();
     let mut query = sqlx::query(&sql);
     for val in &all_values {
-        query = bind_query_value(query, val);
+        query = bind_query_value(query, val)?;
     }
 
     if let Some(tx_mutex) = tx {
@@ -995,7 +996,7 @@ pub async fn generic_query(
             let start = Instant::now();
             let mut query = sqlx::query(&sql);
             for val in &values {
-                query = bind_query_value(query, val);
+                query = bind_query_value(query, val)?;
             }
 
             let rows = if let Some(tx_mutex) = tx {
@@ -1112,7 +1113,7 @@ pub fn query_lazy(
     let stream = futures::stream::once(async move {
         let mut query = sqlx::query(&sql);
         for val in &values {
-            query = bind_query_value(query, val);
+            query = bind_query_value(query, val)?;
         }
 
         if let Some(tx_mutex) = tx {

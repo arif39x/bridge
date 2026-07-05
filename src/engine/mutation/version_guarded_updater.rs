@@ -86,7 +86,7 @@ impl<'dialect> VersionGuardedUpdater<'dialect> {
     ) -> Result<u64, VersionGuardedUpdateError> {
         let mut query = sqlx::query(sql);
         for val in values {
-            query = bind_query_value(query, val);
+            query = bind_query_value(query, val)?;
         }
 
         let result = if let Some(tx_mutex) = &self.tx {
@@ -148,4 +148,10 @@ pub enum VersionGuardedUpdateError {
 
     #[error("Database execution failed: {reason}")]
     DatabaseExecutionFailure { reason: String },
+}
+
+impl From<crate::error::BridgeError> for VersionGuardedUpdateError {
+    fn from(e: crate::error::BridgeError) -> Self {
+        VersionGuardedUpdateError::DatabaseExecutionFailure { reason: e.to_string() }
+    }
 }

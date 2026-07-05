@@ -133,7 +133,7 @@ impl<'dialect> BatchRelationLoader<'dialect> {
     ) -> Result<Vec<serde_json::Value>, BatchLoaderError> {
         let mut query = sqlx::query(sql);
         for val in values {
-            query = bind_query_value(query, val);
+            query = bind_query_value(query, val)?;
         }
 
         let rows: Vec<AnyRow> = if let Some(tx_mutex) = tx {
@@ -189,4 +189,10 @@ pub enum BatchLoaderError {
 
     #[error("Database execution failed: {reason}")]
     DatabaseExecutionFailure { reason: String },
+}
+
+impl From<crate::error::BridgeError> for BatchLoaderError {
+    fn from(e: crate::error::BridgeError) -> Self {
+        BatchLoaderError::DatabaseExecutionFailure { reason: e.to_string() }
+    }
 }
