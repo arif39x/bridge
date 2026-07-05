@@ -322,5 +322,8 @@ class QueryBuilder:
         Returns:
             A model instance or None.
         """
-        res = await self.limit(1).fetch(tx=tx)
+        original_limit = self._limit
+        self._limit = 1
+        res = await self.fetch(tx=tx)
+        self._limit = original_limit
         return res[0] if res else None
