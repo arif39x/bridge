@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional, Tuple, Type
 
 import bridge_rs
 
+from .. import execute_raw
 from ..core import _MODEL_REGISTRY
 from .snapshot import SchemaSnapshot, TableSnapshot, ColumnSnapshot
 from .differ import diff, CreateTable, DropTable, RenameTable, AddColumn, DropColumn, RenameColumn, AlterColumn
@@ -52,7 +53,7 @@ class MigrationEngine:
                    "applied_at DATETIME DEFAULT GETDATE());")
 
         if sql:
-            await bridge_rs.execute_raw(sql)
+            await execute_raw(sql)
 
     def _get_current_model_schema(self) -> SchemaSnapshot:
         tables = {}
