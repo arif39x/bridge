@@ -99,8 +99,8 @@ class QueryBuilder:
             The QueryBuilder instance for chaining.
         """
 
-        if count < 0:
-            raise ValidationError("Limit count must be non-negative")
+        if count < 1:
+            raise ValidationError("Limit count must be a positive integer")
         self._limit = count
         return self
 
