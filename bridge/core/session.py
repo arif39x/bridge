@@ -4,6 +4,8 @@ from typing import Any, Dict, Optional, Type
 from collections import OrderedDict
 import time
 
+from ..common.exceptions import SessionExpiredError
+
 class Session:
     """The Persistence Manager / Session (x_4) — The Unit of Work Managing Object Lifecycle."""
 
@@ -19,7 +21,7 @@ class Session:
 
     def _check_lifetime(self):
         if time.time() - self._created_at > self._max_lifetime:
-            raise RuntimeError("Session has expired. Please open a new session.")
+            raise SessionExpiredError("Session has expired. Please open a new session.")
 
     async def commit(self):
         self._check_lifetime()

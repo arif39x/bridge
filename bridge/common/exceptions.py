@@ -37,3 +37,7 @@ class ProjectionError(BridgeError, AttributeError):
 class CompositeKeyError(BridgeError):
     """Raised when composite primary key operations fail."""
     pass
+
+class SessionExpiredError(BridgeError):
+    """Raised when a session has exceeded its maximum lifetime."""
+    pass
