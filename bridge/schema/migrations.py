@@ -126,14 +126,19 @@ class MigrationEngine:
         print(f"Generated migration: {filepath}")
         print(f"Generated down migration: {down_filepath}")
 
+    def _column_type_sql(self, col) -> str:
+        sql = bridge_rs.resolve_type(col.data_type, self.dialect)
+        if col.is_primary_key:
+            sql += " PRIMARY KEY"
+        if not col.is_nullable:
+            sql += " NOT NULL"
+        return sql
+
     def _render_op(self, op) -> Tuple[str, str]:
         if isinstance(op, CreateTable):
             col_defs = []
             for col in op.table.columns.values():
-                sql_type = bridge_rs.resolve_type(col.data_type, self.dialect)
-                if col.is_primary_key:
-                    sql_type += " PRIMARY KEY"
-                col_defs.append(f"  {col.name} {sql_type}")
+                col_defs.append(f"  {col.name} {self._column_type_sql(col)}")
 
             up = f"CREATE TABLE {op.table.name} (\n" + ",\n".join(col_defs) + "\n);"
             down = f"DROP TABLE {op.table.name};"
@@ -143,10 +148,7 @@ class MigrationEngine:
             up = f"DROP TABLE {op.table_name};"
             col_defs = []
             for col in op.table.columns.values():
-                sql_type = bridge_rs.resolve_type(col.data_type, self.dialect)
-                if col.is_primary_key:
-                    sql_type += " PRIMARY KEY"
-                col_defs.append(f"  {col.name} {sql_type}")
+                col_defs.append(f"  {col.name} {self._column_type_sql(col)}")
             down = f"CREATE TABLE {op.table_name} (\n" + ",\n".join(col_defs) + "\n);"
             return up, down
 
@@ -160,15 +162,13 @@ class MigrationEngine:
             return up, down
 
         if isinstance(op, AddColumn):
-            sql_type = bridge_rs.resolve_type(op.column.data_type, self.dialect)
-            up = f"ALTER TABLE {op.table_name} ADD COLUMN {op.column.name} {sql_type};"
+            up = f"ALTER TABLE {op.table_name} ADD COLUMN {op.column.name} {self._column_type_sql(op.column)};"
             down = f"ALTER TABLE {op.table_name} DROP COLUMN {op.column.name};"
             return up, down
 
         if isinstance(op, DropColumn):
             up = f"ALTER TABLE {op.table_name} DROP COLUMN {op.column_name};"
-            sql_type = bridge_rs.resolve_type(op.column.data_type, self.dialect)
-            down = f"ALTER TABLE {op.table_name} ADD COLUMN {op.column.name} {sql_type};"
+            down = f"ALTER TABLE {op.table_name} ADD COLUMN {op.column.name} {self._column_type_sql(op.column)};"
             return up, down
 
         if isinstance(op, RenameColumn):
@@ -183,6 +183,8 @@ class MigrationEngine:
         if isinstance(op, AlterColumn):
             new_type = bridge_rs.resolve_type(op.new_column.data_type, self.dialect)
             old_type = bridge_rs.resolve_type(op.old_column.data_type, self.dialect)
+            new_type += " NOT NULL" if not op.new_column.is_nullable else " NULL"
+            old_type += " NOT NULL" if not op.old_column.is_nullable else " NULL"
             up = f"ALTER TABLE {op.table_name} ALTER COLUMN {op.new_column.name} {new_type};"
             down = f"ALTER TABLE {op.table_name} ALTER COLUMN {op.new_column.name} {old_type};"
             return up, down

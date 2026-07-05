@@ -1193,9 +1193,5 @@ pub fn resolve_python_type_to_sql(py_type: &str, dialect: &str) -> BridgeResult<
         }
     };
 
-    if !is_optional {
-        Ok(format!("{} NOT NULL", sql_type))
-    } else {
-        Ok(sql_type)
-    }
+    Ok(sql_type)
 }
