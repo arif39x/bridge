@@ -2,7 +2,7 @@ from datetime import datetime, timedelta
 from typing import Type, List, Optional
 from fastapi import FastAPI, APIRouter, Request, Depends, HTTPException
 from fastapi.responses import HTMLResponse
-from ..core.base import BaseModel, _MODEL_REGISTRY
+from ..core.base import BaseModel, Registry, _MODEL_REGISTRY
 from .auth import get_current_user, User, SECRET_KEY, ALGORITHM, verify_credentials
 from .csrf import generate_csrf_token, CSRF_COOKIE_NAME, csrf_protect
 from .ratelimit import rate_limit
@@ -11,9 +11,10 @@ import jwt
 
 
 class AdminPanel:
-    def __init__(self, title: str = "Bridge Admin"):
+    def __init__(self, title: str = "Bridge Admin", registry: Optional[Registry] = None):
         self.title = title
         self.models: List[Type[BaseModel]] = []
+        self.registry = registry or _MODEL_REGISTRY
         self.router = APIRouter(prefix="/admin")
 
     def register(self, model_class: Type[BaseModel]):
@@ -67,7 +68,7 @@ class AdminPanel:
 
         @self.router.get("/{table}", response_class=HTMLResponse)
         async def admin_model_list(table: str):
-            model_cls = _MODEL_REGISTRY.get(table)
+            model_cls = self.registry.get(table)
             if not model_cls:
                 return "Model not found", 404
 

@@ -2,12 +2,13 @@ import json
 import os
 import uuid
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple, Type
+from typing import Any, Dict, Iterable, List, Optional, Tuple, Type
 
 import bridge_rs
 
 from .. import execute_raw
 from ..core import _MODEL_REGISTRY
+from ..core.base import BaseModel, Registry
 from .snapshot import SchemaSnapshot, TableSnapshot, ColumnSnapshot
 from .differ import diff, CreateTable, DropTable, RenameTable, AddColumn, DropColumn, RenameColumn, AlterColumn
 
@@ -15,12 +16,25 @@ MIGRATIONS_DIR = os.environ.get("BRIDGE_MIGRATIONS_DIR", "migrations")
 
 
 class MigrationEngine:
-    def __init__(self, dialect: str = "sqlite", migrations_dir: Optional[str] = None):
+    def __init__(
+        self,
+        dialect: str = "sqlite",
+        migrations_dir: Optional[str] = None,
+        models: Optional[Iterable[Type[BaseModel]]] = None,
+        registry: Optional[Registry] = None,
+    ):
         self.dialect = dialect
         self._migrations_dir = migrations_dir or MIGRATIONS_DIR
         self._snapshot_path = os.path.join(self._migrations_dir, "schema_snapshot.json")
         if not os.path.exists(self._migrations_dir):
             os.makedirs(self._migrations_dir)
+
+        if models is not None:
+            self._model_map: Dict[str, Type[BaseModel]] = {m.table: m for m in models}
+        elif registry is not None:
+            self._model_map = dict(registry.items())
+        else:
+            self._model_map = dict(BaseModel.__registry__.items())
 
     def load_snapshot(self) -> SchemaSnapshot:
         if os.path.exists(self._snapshot_path):
@@ -60,7 +74,7 @@ class MigrationEngine:
         # need to maintain stable IDs. If they exist in old snapshot, reuse them.
         old_snapshot = self.load_snapshot()
 
-        for table_name, model_cls in _MODEL_REGISTRY.items():
+        for table_name, model_cls in self._model_map.items():
             field_defs = model_cls.get_field_definitions()
             columns = {}
 

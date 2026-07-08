@@ -1,5 +1,4 @@
-from contextvars import ContextVar
-from typing import Any, Dict, List, Optional, Type, Union, get_type_hints
+from typing import Any, Dict, Iterable, List, Optional, Type, Union, get_type_hints
 
 import bridge_rs
 
@@ -9,7 +8,79 @@ from .query import QueryBuilder
 
 BULK_INSERT_CHUNK_SIZE = 1000
 
-_MODEL_REGISTRY: Dict[str, Type["BaseModel"]] = {}
+
+class Registry:
+    __slots__ = ("_models",)
+
+    def __init__(self):
+        self._models: Dict[str, Type["BaseModel"]] = {}
+
+    def register(self, table: str, model_cls: Type["BaseModel"]) -> None:
+        self._models[table] = model_cls
+
+    def unregister(self, table: str) -> None:
+        self._models.pop(table, None)
+
+    def clear(self) -> None:
+        self._models.clear()
+
+    def get(self, table: str, default=None) -> Optional[Type["BaseModel"]]:
+        return self._models.get(table, default)
+
+    def models(self) -> List[Type["BaseModel"]]:
+        return list(self._models.values())
+
+    def __getitem__(self, table: str) -> Type["BaseModel"]:
+        return self._models[table]
+
+    def __setitem__(self, table: str, model_cls: Type["BaseModel"]) -> None:
+        self._models[table] = model_cls
+
+    def __delitem__(self, table: str) -> None:
+        del self._models[table]
+
+    def __contains__(self, table: str) -> bool:
+        return table in self._models
+
+    def __len__(self) -> int:
+        return len(self._models)
+
+    def __iter__(self):
+        return iter(self._models)
+
+    def keys(self):
+        return self._models.keys()
+
+    def values(self):
+        return self._models.values()
+
+    def items(self):
+        return self._models.items()
+
+
+_DEFAULT_REGISTRY = Registry()
+_MODEL_REGISTRY: Registry = _DEFAULT_REGISTRY
+
+
+def create_base(name: str) -> Type["BaseModel"]:
+    registry = Registry()
+    base = type(name, (BaseModel,), {"__registry__": registry})
+    return base
+
+
+class registry_scope:
+    def __init__(self, base: Type["BaseModel"], registry: Registry):
+        self._base = base
+        self._new_registry = registry
+        self._old_registry = None
+
+    def __enter__(self):
+        self._old_registry = self._base.__registry__
+        self._base.__registry__ = self._new_registry
+        return self._new_registry
+
+    def __exit__(self, *args):
+        self._base.__registry__ = self._old_registry
 
 
 class BaseModel:
@@ -17,11 +88,14 @@ class BaseModel:
     _fields: List[str] = []
     _primary_keys: List[str] = ["id"]
     _projected_fields: Optional[List[str]] = None
+    __registry__: Registry = _DEFAULT_REGISTRY
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
-        if cls.table:
-            _MODEL_REGISTRY[cls.table] = cls
+        should_register = cls.__dict__.get("register", True)
+        if cls.table and should_register:
+            registry = cls.__registry__
+            registry.register(cls.table, cls)
 
             field_defs = cls.get_field_definitions()
             columns = []
