@@ -1,15 +1,16 @@
 use crate::error::{BridgeError, BridgeResult, DiagnosticInfo};
 use sqlx::AnyPool;
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, OnceLock, RwLock};
 
+#[derive(Debug)]
 struct PoolManagerInner {
     pools: HashMap<String, AnyPool>,
     urls: HashMap<String, String>,
     default_key: Option<String>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct PoolManager {
     inner: Arc<RwLock<PoolManagerInner>>,
 }
@@ -81,9 +82,21 @@ impl PoolManager {
     }
 }
 
-static POOL_MANAGER: once_cell::sync::Lazy<PoolManager> =
-    once_cell::sync::Lazy::new(PoolManager::new);
+
+
+static POOL_MANAGER: OnceLock<PoolManager> = OnceLock::new();
+
+pub fn init_pool_manager() -> &'static PoolManager {
+    POOL_MANAGER.get_or_init(|| {
+        tracing::info!("PoolManager initialized via init_pool_manager() fallback");
+        PoolManager::new()
+    })
+}
 
 pub fn pool_manager() -> &'static PoolManager {
-    &POOL_MANAGER
+    POOL_MANAGER.get().expect("BUG: PoolManager not initialized. Call init_pool_manager() during module setup.")
+}
+
+pub fn set_pool_manager(pm: PoolManager) -> Result<(), PoolManager> {
+    POOL_MANAGER.set(pm)
 }
