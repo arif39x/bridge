@@ -1,10 +1,13 @@
 import bridge_rs
 from threading import Lock
-from typing import Any, Dict, Optional, Type
+from typing import TYPE_CHECKING, Any, Dict, Optional, Type, cast
 from collections import OrderedDict
 import time
 
 from ..common.exceptions import SessionExpiredError
+
+if TYPE_CHECKING:
+    from .base import BaseModel
 
 class Session:
     """The Persistence Manager / Session (x_4) — The Unit of Work Managing Object Lifecycle."""
@@ -49,7 +52,7 @@ class Session:
             self._check_lifetime()
             await bridge_rs.flush(self._rs_session, dirty_data)
 
-    def get_entity(self, table: str, pk_values: tuple) -> Optional[Any]:
+    def get_entity(self, table: str, pk_values: tuple) -> Optional["BaseModel"]:
         self._check_lifetime()
         key = f"{table}:{pk_values}"
         entity = self._rs_session.get_entity(key)
@@ -59,9 +62,9 @@ class Session:
                     if cached_key == key:
                         self._tracked_entities.move_to_end(cache_key)
                         break
-        return entity
+        return cast(Optional["BaseModel"], entity)
 
-    def set_entity(self, model_class: Type["BaseModel"], pk_values: tuple, entity: Any):
+    def set_entity(self, model_class: Type["BaseModel"], pk_values: tuple, entity: "BaseModel"):
         self._check_lifetime()
         key = f"{model_class.table}:{pk_values}"
 

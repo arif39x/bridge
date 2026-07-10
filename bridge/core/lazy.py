@@ -1,9 +1,10 @@
-from typing import Any, Dict, List, Optional, Type, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Type
 import pyarrow as pa
 from ..common.exceptions import ProjectionError
 
 if TYPE_CHECKING:
     from .base import BaseModel
+    from .session import Session
 
 class LazyModelProxy:
     __slots__ = ("_batch", "_row_index", "_model_class", "_session", "_projected_fields", "_materialized_instance")
@@ -13,7 +14,7 @@ class LazyModelProxy:
         batch: pa.RecordBatch,
         row_index: int,
         model_class: Type["BaseModel"],
-        session: Any = None,
+        session: Optional["Session"] = None,
         projected_fields: Optional[List[str]] = None
     ) -> None:
         self._batch = batch
@@ -36,7 +37,7 @@ class LazyModelProxy:
                 instance._projected_fields = self._projected_fields
             
             # Identity Map population
-            if hasattr(self._session, "set_entity") and not self._projected_fields:
+            if self._session is not None and not self._projected_fields:
                 pk_values = tuple(getattr(instance, k) for k in self._model_class._primary_keys)
                 self._session.set_entity(self._model_class, pk_values, instance)
             

@@ -1,6 +1,11 @@
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import Any, AsyncIterator, Dict, List, Optional, Type
+from typing import TYPE_CHECKING, Any, AsyncIterator, Dict, List, Optional, Type, Union
+
+if TYPE_CHECKING:
+    from .base import BaseModel
+    from .lazy import LazyModelProxy
+    from .session import Session
 
 import bridge_rs
 
@@ -32,7 +37,7 @@ class Raw:
 
     __slots__ = ("sql", "params")
 
-    def __init__(self, sql: str, *params: Any) -> None:
+    def __init__(self, sql: str, *params: object) -> None:
         self.sql = sql
         self.params = list(params)
 
@@ -144,7 +149,7 @@ class QueryBuilder:
         filters.update(self._raw_filters)
         return filters
 
-    async def fetch(self, tx: Any = None) -> List[Any]:
+    async def fetch(self, tx: Optional["Session"] = None) -> List["BaseModel"]:
         """
         Execute the query and return all results as model instances.
 
@@ -156,8 +161,7 @@ class QueryBuilder:
         """
         filters = self._merged_filters()
         try:
-            # Handle Session or TxHandle
-            rs_tx = tx._rs_session if hasattr(tx, "_rs_session") else tx
+            rs_tx = tx._rs_session if tx is not None else tx
             eager_loads_payload = [
                 {
                     "relation_name": req.relation_name,
@@ -176,13 +180,13 @@ class QueryBuilder:
             instances = []
             for res in raw_results:
                 instance = self.model_class(**res)
-                if hasattr(tx, "set_entity"):
+                if tx is not None:
                     instance._session = tx
                 if self._projection:
                     instance._projected_fields = self._projection
 
                 # Identity Map population
-                if hasattr(tx, "set_entity") and not self._projection:
+                if tx is not None and not self._projection:
                     pk_values = tuple(
                         getattr(instance, k) for k in self.model_class._primary_keys
                     )
@@ -233,7 +237,7 @@ class QueryBuilder:
                         related = []
                         for data in related_data_list:
                             rel_inst = target_cls(**data)
-                            if hasattr(tx, "set_entity"):
+                            if tx is not None:
                                 rel_inst._session = tx
                                 pk_vals = tuple(
                                     getattr(rel_inst, k)
@@ -247,7 +251,7 @@ class QueryBuilder:
         except (RuntimeError, ValueError, KeyError) as e:
             raise DatabaseError(f"Fetch failed: {e}") from e
 
-    async def fetch_arrow(self, tx: Any = None) -> List[Any]:
+    async def fetch_arrow(self, tx: Optional["Session"] = None) -> List["LazyModelProxy"]:
         """
         Execute the query using Apache Arrow for high-performance marshalling.
         Returns LazyModelProxy instances that materialize on access.
@@ -260,8 +264,7 @@ class QueryBuilder:
 
         filters = self._merged_filters()
         try:
-            # Handle Session or TxHandle
-            rs_tx = tx._rs_session if hasattr(tx, "_rs_session") else tx
+            rs_tx = tx._rs_session if tx is not None else tx
             ipc_bytes = await bridge_rs.fetch_all_arrow(
                 self.model_class.table, filters, self._limit, self._projection, tx=rs_tx
             )
@@ -285,7 +288,7 @@ class QueryBuilder:
         except (RuntimeError, ValueError, KeyError) as e:
             raise DatabaseError(f"Arrow fetch failed: {e}") from e
 
-    async def fetch_lazy(self, tx: Any = None) -> AsyncIterator[Any]:
+    async def fetch_lazy(self, tx: Optional["Session"] = None) -> AsyncIterator["BaseModel"]:
         """
         Execute the query and return an async iterator for the results.
 
@@ -293,21 +296,20 @@ class QueryBuilder:
             An async iterator of model instances.
         """
         filters = self._merged_filters()
-        # Handle Session or TxHandle
-        rs_tx = tx._rs_session if hasattr(tx, "_rs_session") else tx
+        rs_tx = tx._rs_session if tx is not None else tx
         stream = bridge_rs.fetch_lazy(
             self.model_class.table, filters, self._limit, self._projection, tx=rs_tx
         )
 
         async for item in stream:
             instance = self.model_class(**item)
-            if hasattr(tx, "set_entity"):
+            if tx is not None:
                 instance._session = tx
             if self._projection:
                 instance._projected_fields = self._projection
 
             # Identity Map population
-            if hasattr(tx, "set_entity") and not self._projection:
+            if tx is not None and not self._projection:
                 pk_values = tuple(
                     getattr(instance, k) for k in self.model_class._primary_keys
                 )
@@ -315,7 +317,7 @@ class QueryBuilder:
 
             yield instance
 
-    async def first(self, tx: Any = None) -> Optional[Any]:
+    async def first(self, tx: Optional["Session"] = None) -> Optional["BaseModel"]:
         """
         Execute the query and return the first result, or None if no results.
 

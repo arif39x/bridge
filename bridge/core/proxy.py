@@ -1,12 +1,14 @@
-from typing import Any, Callable, Optional, Type
-import asyncio
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Optional
+
+if TYPE_CHECKING:
+    from .session import Session
 
 class LazyProxy:
     """Proxy / Lazy Loader (x_9) — Virtual Placeholders for Handling Deep Relationship Graphs."""
     
     __slots__ = ("_session", "_load_func", "_resolved_data", "_is_resolved")
 
-    def __init__(self, session: Any, load_func: Callable):
+    def __init__(self, session: Optional["Session"], load_func: Callable[[], Awaitable[Any]]):
         self._session = session
         self._load_func = load_func
         self._resolved_data = None

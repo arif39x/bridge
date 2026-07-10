@@ -1,9 +1,12 @@
-from typing import Any, List, Type, Optional
+from typing import TYPE_CHECKING, Any, List, Optional, Type, Union
 import bridge_rs
 from .proxy import LazyProxy
 
+if TYPE_CHECKING:
+    from .base import BaseModel
+
 class RelationDescriptor:
-    def __init__(self, target_model: Any):
+    def __init__(self, target_model: Union[Type["BaseModel"], str]):
         self._target_model = target_model
 
     def _resolve_target(self):
@@ -25,7 +28,7 @@ class RelationDescriptor:
 
 
 class HasMany(RelationDescriptor):
-    def __init__(self, target_model: Any, foreign_key: str):
+    def __init__(self, target_model: Union[Type["BaseModel"], str], foreign_key: str):
         super().__init__(target_model)
         self.foreign_key = foreign_key
 
@@ -55,7 +58,7 @@ class HasMany(RelationDescriptor):
 
 
 class BelongsToMany(RelationDescriptor):
-    def __init__(self, target_model: Any, junction: str, left_key: str, right_key: str):
+    def __init__(self, target_model: Union[Type["BaseModel"], str], junction: str, left_key: str, right_key: str):
         super().__init__(target_model)
         self.junction = junction
         self.left_key = left_key
@@ -92,7 +95,7 @@ class BelongsToMany(RelationDescriptor):
 
 
 class SelfReferential(RelationDescriptor):
-    def __init__(self, target_model: Any, parent_key: str):
+    def __init__(self, target_model: Union[Type["BaseModel"], str], parent_key: str):
         super().__init__(target_model)
         self.parent_key = parent_key
 
