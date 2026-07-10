@@ -83,6 +83,15 @@ class registry_scope:
         self._base.__registry__ = self._old_registry
 
 
+def _validate_fields(cls, data: dict) -> None:
+    unknown = [k for k in data if k not in cls._fields]
+    if unknown:
+        raise TypeError(
+            f"{cls.__name__} got unexpected field(s): {unknown}. "
+            f"Valid fields: {cls._fields}"
+        )
+
+
 class BaseModel:
     table: str = ""
     _fields: List[str] = []
@@ -163,6 +172,7 @@ class BaseModel:
 
     @classmethod
     async def create(cls, tx=None, **kwargs) -> Any:
+        _validate_fields(cls, kwargs)
         # Create instance locally for hooks
         class TempInstance:
             pass
@@ -321,6 +331,7 @@ class BaseModel:
         await bridge_rs.delete_row(cls.table, filters, tx=rs_tx)
 
     def __init__(self, **kwargs):
+        _validate_fields(self.__class__, kwargs)
         self._session = None
         for k, v in kwargs.items():
             setattr(self, k, v)
