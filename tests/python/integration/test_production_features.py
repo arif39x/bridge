@@ -1,7 +1,8 @@
 import asyncio
 import pytest
 import os
-from bridge import connect, BaseModel, User, Post
+from bridge import connect, BaseModel
+from .models import User, Post
 from bridge.core.relations import HasMany, BelongsToMany, SelfReferential
 from bridge.common.exceptions import ProjectionError, CompositeKeyError
 from bridge.api.generate import generate_router

@@ -1,6 +1,7 @@
 import asyncio
 
-from bridge import connect, NotFoundError, User, Post
+from bridge import connect, NotFoundError
+from .models import User, Post
 
 
 async def main():

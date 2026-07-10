@@ -154,13 +154,13 @@ fn py_to_query_value(
         return Ok(QueryValue::Null);
     }
 
-    let registry_guard = engine::metadata::REGISTRY.read().map_err(|e| {
+    let registry = engine::metadata::get_registry().ok_or_else(|| {
         BridgeError::Internal(
-            format!("Registry lock poisoned: {}", e),
+            "Registry not initialized".to_string(),
             DiagnosticInfo::default(),
         )
     })?;
-    let meta = registry_guard
+    let meta = registry
         .mappings
         .get(table_name)
         .and_then(|m| m.columns.get(column_name));
@@ -309,7 +309,7 @@ fn connect(
                 .map_err(bridge_error_to_py)?;
 
             let mgr = engine::pool_manager::pool_manager();
-            mgr.register("primary".to_string(), pool, url_clone.clone())
+            mgr.register("primary".to_string(), pool, url_clone)
                 .map_err(bridge_error_to_py)?;
             mgr.set_default("primary".to_string())
                 .map_err(bridge_error_to_py)?;

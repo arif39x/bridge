@@ -1,7 +1,8 @@
 use once_cell::sync::Lazy;
+use once_cell::sync::OnceCell;
 use pyo3::prelude::*;
 use std::collections::HashMap;
-use std::sync::RwLock;
+use std::sync::Mutex;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ColumnMetadata {
@@ -19,23 +20,19 @@ pub struct EntityMapping {
 
 pub struct MetadataRegistry {
     pub mappings: HashMap<String, EntityMapping>,
-    pub locked: bool,
 }
 
-impl MetadataRegistry {
-    pub fn new() -> Self {
-        Self {
-            mappings: HashMap::new(),
-            locked: false,
-        }
-    }
-}
+// Build-phase storage: accessed only during registration (before locking)
+static BUILD_MAPPINGS: Lazy<Mutex<HashMap<String, EntityMapping>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
 
-pub static REGISTRY: Lazy<RwLock<MetadataRegistry>> =
-    Lazy::new(|| RwLock::new(MetadataRegistry::new()));
+// Final frozen registry: set once by lock_registry, then read-only.
+// No lock contention or poison risk for readers.
+static REGISTRY: OnceCell<MetadataRegistry> = OnceCell::new();
 
-fn poison_err() -> PyErr {
-    pyo3::exceptions::PyRuntimeError::new_err("Metadata registry lock poisoned")
+/// Returns a reference to the frozen registry, or None if not yet locked.
+pub fn get_registry() -> Option<&'static MetadataRegistry> {
+    REGISTRY.get()
 }
 
 #[pyfunction]
@@ -43,12 +40,15 @@ pub fn register_entity(
     table_name: String,
     columns: Vec<(String, String, bool, bool)>,
 ) -> PyResult<()> {
-    let mut registry = REGISTRY.write().map_err(|_| poison_err())?;
-    if registry.locked {
+    if REGISTRY.get().is_some() {
         return Err(pyo3::exceptions::PyRuntimeError::new_err(
             "Metadata registry is locked. Cannot register new entities after initialization.",
         ));
     }
+
+    let mut mappings = BUILD_MAPPINGS.lock().map_err(|_| {
+        pyo3::exceptions::PyRuntimeError::new_err("Build mappings lock poisoned")
+    })?;
 
     let mut col_map = HashMap::new();
     for (name, data_type, is_nullable, is_primary_key) in columns {
@@ -63,7 +63,7 @@ pub fn register_entity(
         );
     }
 
-    registry.mappings.insert(
+    mappings.insert(
         table_name.clone(),
         EntityMapping {
             table_name,
@@ -75,7 +75,15 @@ pub fn register_entity(
 
 #[pyfunction]
 pub fn lock_registry() -> PyResult<()> {
-    let mut registry = REGISTRY.write().map_err(|_| poison_err())?;
-    registry.locked = true;
-    Ok(())
+    let mut mappings = BUILD_MAPPINGS.lock().map_err(|_| {
+        pyo3::exceptions::PyRuntimeError::new_err("Build mappings lock poisoned")
+    })?;
+
+    let registry = MetadataRegistry {
+        mappings: std::mem::take(&mut *mappings),
+    };
+
+    REGISTRY.set(registry).map_err(|_| {
+        pyo3::exceptions::PyRuntimeError::new_err("Registry is already locked")
+    })
 }

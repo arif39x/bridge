@@ -25,10 +25,14 @@ const RESERVED_KEYWORDS: [&str; 18] = [
 pub static VALID_SQL_IDENTIFIER_PATTERN: Lazy<Regex> =
     Lazy::new(|| Regex::new(VALID_IDENTIFIER_REGEX).expect("Invalid hardcoded identifier regex"));
 
-pub static CIRCUIT_BREAKER: Lazy<crate::engine::circuit_breaker::CircuitBreaker> =
-    Lazy::new(|| {
-        crate::engine::circuit_breaker::CircuitBreaker::new(5, std::time::Duration::from_secs(30))
-    });
+pub static CIRCUIT_BREAKER_REGISTRY: Lazy<
+    crate::engine::circuit_breaker::CircuitBreakerRegistry,
+> = Lazy::new(|| {
+    crate::engine::circuit_breaker::CircuitBreakerRegistry::new(
+        5,
+        std::time::Duration::from_secs(30),
+    )
+});
 
 /// Represents supported SQL dialects.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -412,15 +416,15 @@ pub fn validate_query_filters(
 ) -> BridgeResult<()> {
     #[cfg(debug_assertions)]
     {
-        use crate::engine::metadata::REGISTRY;
+        use crate::engine::metadata::get_registry;
 
-        let registry_guard = REGISTRY.read().map_err(|e| {
+        let registry = get_registry().ok_or_else(|| {
             BridgeError::Internal(
-                format!("Registry lock poisoned: {}", e),
+                "Registry not initialized".to_string(),
                 DiagnosticInfo::default(),
             )
         })?;
-        if let Some(mapping) = registry_guard.mappings.get(table_name) {
+        if let Some(mapping) = registry.mappings.get(table_name) {
             for (col, val) in filters {
                 let meta = mapping.columns.get(col).ok_or_else(|| {
                     BridgeError::Validation(
@@ -991,46 +995,46 @@ pub async fn generic_query(
 
     let (sql, values) = dialect.build_select(table_name, &columns, &filter_vec, limit)?;
 
-    CIRCUIT_BREAKER
-        .call(|| async {
-            let start = Instant::now();
-            let mut query = sqlx::query(&sql);
-            for val in &values {
-                query = bind_query_value(query, val)?;
-            }
+    let cb = CIRCUIT_BREAKER_REGISTRY.get_or_create(url)?;
+    cb.call(|| async {
+        let start = Instant::now();
+        let mut query = sqlx::query(&sql);
+        for val in &values {
+            query = bind_query_value(query, val)?;
+        }
 
-            let rows = if let Some(tx_mutex) = tx {
-                let mut tx_guard = tx_mutex.lock().await;
-                let tx_conn = tx_guard.as_mut().ok_or_else(|| {
-                    BridgeError::Validation(
-                        "Transaction already closed".to_string(),
-                        DiagnosticInfo::default(),
-                    )
-                })?;
-                query.fetch_all(&mut **tx_conn).await.map_err(|e| {
-                    BridgeError::from(e)
-                        .with_sql(sql.clone(), None)
-                        .add_breadcrumb("generic_query")
-                })?
-            } else {
-                query.fetch_all(pool).await.map_err(|e| {
-                    BridgeError::from(e)
-                        .with_sql(sql.clone(), None)
-                        .add_breadcrumb("generic_query")
-                })?
-            };
+        let rows = if let Some(tx_mutex) = tx {
+            let mut tx_guard = tx_mutex.lock().await;
+            let tx_conn = tx_guard.as_mut().ok_or_else(|| {
+                BridgeError::Validation(
+                    "Transaction already closed".to_string(),
+                    DiagnosticInfo::default(),
+                )
+            })?;
+            query.fetch_all(&mut **tx_conn).await.map_err(|e| {
+                BridgeError::from(e)
+                    .with_sql(sql.clone(), None)
+                    .add_breadcrumb("generic_query")
+            })?
+        } else {
+            query.fetch_all(pool).await.map_err(|e| {
+                BridgeError::from(e)
+                    .with_sql(sql.clone(), None)
+                    .add_breadcrumb("generic_query")
+            })?
+        };
 
-            let duration = start.elapsed();
-            logger::emit_telemetry(TelemetryEvent {
-                sql: sql.clone(),
-                duration_micros: duration.as_micros() as u64,
-                operation: "SELECT".to_string(),
-                table: table_name.to_string(),
-            });
+        let duration = start.elapsed();
+        logger::emit_telemetry(TelemetryEvent {
+            sql: sql.clone(),
+            duration_micros: duration.as_micros() as u64,
+            operation: "SELECT".to_string(),
+            table: table_name.to_string(),
+        });
 
-            Ok(rows)
-        })
-        .await
+        Ok(rows)
+    })
+    .await
 }
 
 /// Executes SELECT * FROM table WHERE column IN (id1, id2, ...)

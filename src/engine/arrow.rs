@@ -1,4 +1,4 @@
-use crate::engine::metadata::REGISTRY;
+use crate::engine::metadata::get_registry;
 use crate::error::{BridgeError, BridgeResult, DiagnosticInfo};
 use arrow::array::{ArrayRef, BooleanBuilder, Float64Builder, Int64Builder, StringBuilder};
 use arrow::datatypes::{DataType, Field, Schema};
@@ -12,13 +12,13 @@ pub fn rows_to_arrow_ipc(table_name: &str, rows: &[AnyRow]) -> BridgeResult<Vec<
         return Ok(Vec::new());
     }
 
-    let registry_guard = REGISTRY.read().map_err(|e| {
+    let registry = get_registry().ok_or_else(|| {
         BridgeError::Internal(
-            format!("Registry lock poisoned: {}", e),
+            "Registry not initialized".to_string(),
             DiagnosticInfo::default(),
         )
     })?;
-    let mapping = registry_guard.mappings.get(table_name);
+    let mapping = registry.mappings.get(table_name);
 
     let first_row = &rows[0];
     let mut fields = Vec::new();

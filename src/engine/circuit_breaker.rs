@@ -1,5 +1,6 @@
 use crate::error::{BridgeError, DiagnosticInfo};
-use std::sync::Mutex;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -70,6 +71,14 @@ impl CircuitBreaker {
         }
     }
 
+    pub fn max_failures(&self) -> u32 {
+        self.max_failures
+    }
+
+    pub fn reset_timeout(&self) -> Duration {
+        self.reset_timeout
+    }
+
     fn after_call<R>(&self, result: &Result<R, BridgeError>) -> Result<(), BridgeError> {
         let mut state = self.state.lock().map_err(|e| {
             BridgeError::Internal(
@@ -95,5 +104,41 @@ impl CircuitBreaker {
             },
         }
         Ok(())
+    }
+}
+
+/// A registry of circuit breakers keyed by pool identifier (e.g., database URL).
+/// Each pool gets its own circuit breaker so a failure in one database
+/// does not affect queries against other databases.
+pub struct CircuitBreakerRegistry {
+    breakers: Mutex<HashMap<String, Arc<CircuitBreaker>>>,
+    max_failures: u32,
+    reset_timeout: Duration,
+}
+
+impl CircuitBreakerRegistry {
+    pub fn new(max_failures: u32, reset_timeout: Duration) -> Self {
+        Self {
+            breakers: Mutex::new(HashMap::new()),
+            max_failures,
+            reset_timeout,
+        }
+    }
+
+    fn poison_err() -> BridgeError {
+        BridgeError::Internal(
+            "Circuit breaker registry lock poisoned".into(),
+            DiagnosticInfo::default(),
+        )
+    }
+
+    pub fn get_or_create(&self, key: &str) -> Result<Arc<CircuitBreaker>, BridgeError> {
+        let mut breakers = self.breakers.lock().map_err(|_| Self::poison_err())?;
+        Ok(breakers
+            .entry(key.to_string())
+            .or_insert_with(|| {
+                Arc::new(CircuitBreaker::new(self.max_failures, self.reset_timeout))
+            })
+            .clone())
     }
 }

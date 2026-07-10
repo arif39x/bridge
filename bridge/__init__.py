@@ -8,7 +8,7 @@ from .common import (
     ProjectionError, CompositeKeyError
 )
 
-# Setup internal telemetry bridge
+# Lazy telemetry bridge setup (avoids FFI calls at import time)
 class TelemetryBridge:
     def __init__(self):
         self.logger = logging.getLogger("bridge.telemetry")
@@ -16,16 +16,22 @@ class TelemetryBridge:
     def handle_telemetry(self, event: dict):
         """Standard handler for Rust telemetry events."""
         msg = f"[{event['operation']}] {event['table']} | {event['duration_micros']}μs | SQL: {event['sql']}"
-        if event['duration_micros'] > 100000: # 100ms
+        if event['duration_micros'] > 100000:  # 100ms
             self.logger.warning(f"SLOW QUERY: {msg}")
         else:
             self.logger.debug(msg)
 
-_bridge = TelemetryBridge()
-bridge_rs.set_telemetry_logger(_bridge)
+_telemetry_installed = False
+
+def _install_telemetry():
+    global _telemetry_installed
+    if not _telemetry_installed:
+        bridge_rs.set_telemetry_logger(TelemetryBridge())
+        _telemetry_installed = True
 
 async def connect(url: str):
     """Initialise the database connection pool."""
+    _install_telemetry()
     return await bridge_rs.connect(url)
 
 if hasattr(bridge_rs, "execute_raw"):
@@ -43,25 +49,5 @@ else:
 
 def configure_logging(level: str = "info", slow_query_ms: int = 100):
     """Configure structured query logging."""
+    _install_telemetry()
     bridge_rs.configure_logging(level, slow_query_ms)
-
-# Pre-defined models for convenience
-class User(BaseModel):
-    table = "users"
-    _fields = ["id", "username", "email", "created_at", "updated_at"]
-
-    id: str
-    username: str
-    email: str
-    created_at: str
-    updated_at: str
-
-class Post(BaseModel):
-    table = "posts"
-    _fields = ["id", "title", "user_id", "created_at", "updated_at"]
-
-    id: str
-    title: str
-    user_id: str
-    created_at: str
-    updated_at: str

@@ -1,4 +1,4 @@
-use crate::engine::metadata::{ColumnMetadata, REGISTRY};
+use crate::engine::metadata::{get_registry, ColumnMetadata};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use sqlx::{any::AnyRow, Column, Row};
@@ -9,10 +9,10 @@ pub fn hydrate_row<'py>(
     table_name: &str,
     row: &AnyRow,
 ) -> PyResult<Bound<'py, PyDict>> {
-    let registry_guard = REGISTRY.read().map_err(|e| {
-        pyo3::exceptions::PyRuntimeError::new_err(format!("Registry lock poisoned: {}", e))
+    let registry = get_registry().ok_or_else(|| {
+        pyo3::exceptions::PyRuntimeError::new_err("Registry not initialized")
     })?;
-    let mapping = registry_guard.mappings.get(table_name);
+    let mapping = registry.mappings.get(table_name);
 
     let dict = PyDict::new_bound(py);
 

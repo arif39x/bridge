@@ -2,7 +2,8 @@ import pytest
 import pytest_asyncio
 import logging
 import asyncio
-from bridge import connect, User, execute_raw
+from bridge import connect, execute_raw
+from .models import User
 
 class MockLogHandler(logging.Handler):
     def __init__(self):

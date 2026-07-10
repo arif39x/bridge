@@ -1,7 +1,8 @@
 import pytest
 import pytest_asyncio
 import asyncio
-from bridge import connect, User, Post, transaction, execute_raw, NotFoundError
+from bridge import connect, transaction, execute_raw, NotFoundError
+from .models import User, Post
 
 @pytest_asyncio.fixture
 async def db_session():
