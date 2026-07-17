@@ -193,12 +193,23 @@ fn py_to_query_value(
         }
     }
 
-    if let Ok(s) = obj
-        .call_method0("isoformat")
-        .and_then(|r| r.extract::<String>())
-    {
-        if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(&s) {
-            return Ok(QueryValue::DateTime(dt.with_timezone(&chrono::Utc)));
+    let is_datetime = obj
+        .get_type()
+        .qualname()
+        .is_ok_and(|n| n == "datetime")
+        && obj
+            .get_type()
+            .getattr("__module__")
+            .and_then(|m| m.extract::<String>())
+            .is_ok_and(|m| m == "datetime");
+    if is_datetime {
+        if let Ok(s) = obj
+            .call_method0("isoformat")
+            .and_then(|r| r.extract::<String>())
+        {
+            if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(&s) {
+                return Ok(QueryValue::DateTime(dt.with_timezone(&chrono::Utc)));
+            }
         }
     }
 
