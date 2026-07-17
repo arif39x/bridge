@@ -1,0 +1,38 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: bridge_test
+      POSTGRES_PASSWORD: bridge_test
+      POSTGRES_USER: bridge_test
+    ports:
+      - "5432:5432"
+    tmpfs: /var/lib/postgresql/data
+
+  mysql:
+    image: mysql:8
+    environment:
+      MYSQL_DATABASE: bridge_test
+      MYSQL_PASSWORD: bridge_test
+      MYSQL_ROOT_PASSWORD: bridge_test
+      MYSQL_USER: bridge_test
+    ports:
+      - "3306:3306"
+    tmpfs: /var/lib/mysql
+
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "Bridge_test_123"
+      MSSQL_PID: Developer
+    ports:
+      - "1433:1433"
+
+  cockroachdb:
+    image: cockroachdb/cockroach:v24.1
+    command: start-single-node --insecure
+    ports:
+      - "26257:26257"

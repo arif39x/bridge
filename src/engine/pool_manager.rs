@@ -100,3 +100,79 @@ pub fn pool_manager() -> &'static PoolManager {
 pub fn set_pool_manager(pm: PoolManager) -> Result<(), PoolManager> {
     POOL_MANAGER.set(pm)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::any::AnyPoolOptions;
+
+    async fn make_pool() -> AnyPool {
+        sqlx::any::install_default_drivers();
+        AnyPoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn register_and_get_by_key() {
+        let pm = PoolManager::new();
+        let pool = make_pool().await;
+        pm.register("test_db".into(), pool.clone(), "sqlite::memory:".into()).unwrap();
+
+        let result = pm.get(Some("test_db")).unwrap();
+        assert!(result.is_some());
+        let (retrieved, url) = result.unwrap();
+        assert_eq!(url, "sqlite::memory:");
+    }
+
+    #[tokio::test]
+    async fn get_nonexistent_key() {
+        let pm = PoolManager::new();
+        let result = pm.get(Some("no_such_db")).unwrap();
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn get_without_key_and_no_default() {
+        let pm = PoolManager::new();
+        let result = pm.get(None).unwrap();
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn default_key_operations() {
+        let pm = PoolManager::new();
+        let pool = make_pool().await;
+        pm.register("primary".into(), pool.clone(), "sqlite::memory:".into()).unwrap();
+        pm.set_default("primary".into()).unwrap();
+
+        assert_eq!(pm.get_default_key().unwrap(), Some("primary".into()));
+
+        let result = pm.get(None).unwrap();
+        assert!(result.is_some());
+    }
+
+    #[tokio::test]
+    async fn remove_key() {
+        let pm = PoolManager::new();
+        let pool = make_pool().await;
+        pm.register("k".into(), pool.clone(), "sqlite::memory:".into()).unwrap();
+        pm.set_default("k".into()).unwrap();
+
+        assert!(pm.contains("k").unwrap());
+        pm.remove("k").unwrap();
+        assert!(!pm.contains("k").unwrap());
+        assert!(pm.get_default_key().unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn contains_key() {
+        let pm = PoolManager::new();
+        assert!(!pm.contains("x").unwrap());
+        let pool = make_pool().await;
+        pm.register("x".into(), pool.clone(), "sqlite::memory:".into()).unwrap();
+        assert!(pm.contains("x").unwrap());
+    }
+}

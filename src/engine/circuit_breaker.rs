@@ -142,3 +142,86 @@ impl CircuitBreakerRegistry {
             .clone())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn circuit_breaker_initial_state() {
+        let cb = CircuitBreaker::new(5, Duration::from_secs(30));
+        assert_eq!(cb.max_failures(), 5);
+        assert_eq!(cb.reset_timeout(), Duration::from_secs(30));
+        assert!(cb.before_call().is_ok());
+    }
+
+    #[test]
+    fn circuit_breaker_opens_after_max_failures() {
+        let cb = CircuitBreaker::new(2, Duration::from_secs(60));
+        assert!(cb.before_call().is_ok());
+
+        let err_db = BridgeError::Database(
+            sqlx::Error::Protocol("fail".into()),
+            DiagnosticInfo::default(),
+        );
+        assert!(cb.after_call::<()>(&Err(err_db)).is_ok());
+        assert!(cb.before_call().is_ok());
+
+        let err_internal = BridgeError::Internal("oops".into(), DiagnosticInfo::default());
+        assert!(cb.after_call::<()>(&Err(err_internal)).is_ok());
+
+        let result = cb.before_call();
+        assert!(result.is_err());
+        if let Err(BridgeError::Internal(msg, _)) = result {
+            assert!(msg.contains("OPEN"));
+        } else {
+            panic!("expected Internal error with OPEN message");
+        }
+    }
+
+    #[test]
+    fn circuit_breaker_resets_on_success() {
+        let cb = CircuitBreaker::new(1, Duration::from_secs(60));
+        let err = BridgeError::Database(
+            sqlx::Error::Protocol("fail".into()),
+            DiagnosticInfo::default(),
+        );
+        assert!(cb.after_call::<()>(&Err(err)).is_ok());
+        assert!(cb.before_call().is_err());
+
+        assert!(cb.after_call::<()>(&Ok(())).is_ok());
+        assert!(cb.before_call().is_ok());
+    }
+
+    #[test]
+    fn circuit_breaker_ignores_validation_errors() {
+        let cb = CircuitBreaker::new(1, Duration::from_secs(60));
+        let err = BridgeError::Validation("bad input".into(), DiagnosticInfo::default());
+        assert!(cb.after_call::<()>(&Err(err)).is_ok());
+        assert!(cb.before_call().is_ok());
+    }
+
+    #[test]
+    fn circuit_breaker_half_open_transition() {
+        let cb = CircuitBreaker::new(1, Duration::from_secs(0));
+        let err = BridgeError::Database(
+            sqlx::Error::Protocol("fail".into()),
+            DiagnosticInfo::default(),
+        );
+        assert!(cb.after_call::<()>(&Err(err)).is_ok());
+
+        std::thread::sleep(Duration::from_millis(1));
+        assert!(cb.before_call().is_ok());
+    }
+
+    #[test]
+    fn circuit_breaker_registry_get_or_create() {
+        let reg = CircuitBreakerRegistry::new(3, Duration::from_secs(30));
+        let cb1 = reg.get_or_create("db1").unwrap();
+        let cb2 = reg.get_or_create("db1").unwrap();
+        assert!(Arc::ptr_eq(&cb1, &cb2));
+
+        let cb3 = reg.get_or_create("db2").unwrap();
+        assert!(!Arc::ptr_eq(&cb1, &cb3));
+    }
+}

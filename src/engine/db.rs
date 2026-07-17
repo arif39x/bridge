@@ -1200,3 +1200,330 @@ pub fn resolve_python_type_to_sql(py_type: &str, dialect: &str) -> BridgeResult<
 
     Ok(sql_type)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sql_dialect_from_url_postgres() {
+        assert_eq!(SqlDialect::from_url("postgres://localhost/mydb"), SqlDialect::Postgres);
+        assert_eq!(SqlDialect::from_url("postgresql://localhost/mydb"), SqlDialect::Postgres);
+    }
+
+    #[test]
+    fn sql_dialect_from_url_sqlite() {
+        assert_eq!(SqlDialect::from_url("sqlite:data.db"), SqlDialect::Sqlite);
+        assert_eq!(SqlDialect::from_url("sqlite:///tmp/test.db"), SqlDialect::Sqlite);
+    }
+
+    #[test]
+    fn sql_dialect_from_url_mysql() {
+        assert_eq!(SqlDialect::from_url("mysql://localhost/mydb"), SqlDialect::MySql);
+        assert_eq!(SqlDialect::from_url("mariadb://localhost/mydb"), SqlDialect::MariaDb);
+    }
+
+    #[test]
+    fn sql_dialect_from_url_mssql() {
+        assert_eq!(SqlDialect::from_url("mssql://localhost/mydb"), SqlDialect::MsSql);
+        assert_eq!(SqlDialect::from_url("sqlserver://localhost/mydb"), SqlDialect::MsSql);
+    }
+
+    #[test]
+    fn sql_dialect_from_url_oracle() {
+        assert_eq!(SqlDialect::from_url("oracle://host/sid"), SqlDialect::Oracle);
+        assert_eq!(SqlDialect::from_url("thin://host/service"), SqlDialect::Oracle);
+    }
+
+    #[test]
+    fn sql_dialect_from_url_postgres_variants() {
+        assert_eq!(
+            SqlDialect::from_url("postgres://host.neon.tech/db"),
+            SqlDialect::Neon
+        );
+        assert_eq!(
+            SqlDialect::from_url("postgres://host:26257/db"),
+            SqlDialect::CockroachDb
+        );
+        assert_eq!(
+            SqlDialect::from_url("postgres://yugabyte.host/db"),
+            SqlDialect::YugabyteDb
+        );
+    }
+
+    #[test]
+    fn sql_dialect_from_url_mysql_variants() {
+        assert_eq!(
+            SqlDialect::from_url("mysql://host.psdb.cloud/db"),
+            SqlDialect::PlanetScale
+        );
+        assert_eq!(
+            SqlDialect::from_url("mysql://host.dolt/db"),
+            SqlDialect::Dolt
+        );
+    }
+
+    #[test]
+    fn sql_dialect_from_url_sqlite_variants() {
+        assert_eq!(
+            SqlDialect::from_url("https://d1.cloudflare.com/db"),
+            SqlDialect::CloudflareD1
+        );
+    }
+
+    #[test]
+    fn sql_dialect_from_url_unknown_defaults_to_postgres() {
+        assert_eq!(SqlDialect::from_url("unknown://host/db"), SqlDialect::Postgres);
+    }
+
+    #[test]
+    fn sql_dialect_to_dialect() {
+        assert!(SqlDialect::Postgres.to_dialect().get_placeholder(0).contains('$'));
+        assert_eq!(SqlDialect::Sqlite.to_dialect().get_placeholder(0), "$1");
+        assert_eq!(SqlDialect::MySql.to_dialect().get_placeholder(0), "?");
+        assert_eq!(SqlDialect::MsSql.to_dialect().get_placeholder(0), "@p1");
+        assert_eq!(SqlDialect::Oracle.to_dialect().get_placeholder(0), ":1");
+        assert_eq!(SqlDialect::Neon.to_dialect().get_placeholder(0), "$1");
+        assert_eq!(SqlDialect::CockroachDb.to_dialect().get_placeholder(0), "$1");
+        assert_eq!(SqlDialect::YugabyteDb.to_dialect().get_placeholder(0), "$1");
+        assert_eq!(SqlDialect::MariaDb.to_dialect().get_placeholder(0), "?");
+        assert_eq!(SqlDialect::PlanetScale.to_dialect().get_placeholder(0), "?");
+        assert_eq!(SqlDialect::Dolt.to_dialect().get_placeholder(0), "?");
+        assert_eq!(SqlDialect::CloudflareD1.to_dialect().get_placeholder(0), "$1");
+    }
+
+    #[test]
+    fn dialect_placeholders() {
+        assert_eq!(SqliteDialect.get_placeholder(0), "$1");
+        assert_eq!(SqliteDialect.get_placeholder(9), "$10");
+        assert_eq!(PostgreSqlDialect.get_placeholder(0), "$1");
+        assert_eq!(MySqlDialect.get_placeholder(5), "?");
+        assert_eq!(MsSqlDialect.get_placeholder(0), "@p1");
+        assert_eq!(MsSqlDialect.get_placeholder(2), "@p3");
+        assert_eq!(OracleDialect.get_placeholder(0), ":1");
+        assert_eq!(OracleDialect.get_placeholder(2), ":3");
+    }
+
+    #[test]
+    fn dialect_quote_identifier() {
+        assert_eq!(SqliteDialect.quote_identifier("col"), r#""col""#);
+        assert_eq!(PostgreSqlDialect.quote_identifier("col"), r#""col""#);
+        assert_eq!(MySqlDialect.quote_identifier("col"), "`col`");
+        assert_eq!(MsSqlDialect.quote_identifier("col"), "[col]");
+        assert_eq!(OracleDialect.quote_identifier("col"), r#""col""#);
+    }
+
+    #[test]
+    fn validate_identifier_valid() {
+        assert!(validate_identifier("valid_name").is_ok());
+        assert!(validate_identifier("_leading_underscore").is_ok());
+        assert!(validate_identifier("a1b2c3").is_ok());
+    }
+
+    #[test]
+    fn validate_identifier_invalid() {
+        assert!(validate_identifier("").is_err());
+        assert!(validate_identifier("1number").is_err());
+        assert!(validate_identifier("has spaces").is_err());
+        assert!(validate_identifier("sql-injection").is_err());
+        assert!(validate_identifier("table;").is_err());
+    }
+
+    #[test]
+    fn validate_identifier_reserved_keywords() {
+        assert!(validate_identifier("SELECT").is_err());
+        assert!(validate_identifier("drop").is_err());
+        assert!(validate_identifier("Union").is_err());
+        assert!(validate_identifier("DELETE").is_err());
+    }
+
+    #[test]
+    fn validate_filter_value_safe() {
+        assert!(validate_filter_value(&QueryValue::String("hello".into())).is_ok());
+        assert!(validate_filter_value(&QueryValue::Int(42)).is_ok());
+        assert!(validate_filter_value(&QueryValue::Null).is_ok());
+    }
+
+    #[test]
+    fn validate_filter_value_dangerous() {
+        assert!(validate_filter_value(&QueryValue::String("'; DROP TABLE".into())).is_err());
+        assert!(validate_filter_value(&QueryValue::String("value -- comment".into())).is_err());
+        assert!(validate_filter_value(&QueryValue::String("/* inline */".into())).is_err());
+    }
+
+    #[test]
+    fn build_select_no_filters() {
+        let (sql, values) = PostgreSqlDialect.build_select("users", &[], &[], None).unwrap();
+        assert_eq!(sql, r#"SELECT * FROM "users""#);
+        assert!(values.is_empty());
+    }
+
+    #[test]
+    fn build_select_with_filters() {
+        let filters = vec![
+            ("name".into(), QueryValue::String("alice".into())),
+            ("age".into(), QueryValue::Int(30)),
+        ];
+        let (sql, values) = PostgreSqlDialect
+            .build_select("users", &[], &filters, None)
+            .unwrap();
+        assert!(sql.contains(r#""name" = $1"#));
+        assert!(sql.contains(r#""age" = $2"#));
+        assert_eq!(values.len(), 2);
+    }
+
+    #[test]
+    fn build_select_with_columns() {
+        let columns = vec!["id".into(), "email".into()];
+        let (sql, _) = PostgreSqlDialect
+            .build_select("users", &columns, &[], None)
+            .unwrap();
+        assert_eq!(sql, r#"SELECT "id", "email" FROM "users""#);
+    }
+
+    #[test]
+    fn build_select_with_limit() {
+        let (sql, _) = PostgreSqlDialect
+            .build_select("users", &[], &[], Some(10))
+            .unwrap();
+        assert!(sql.contains("LIMIT 10"));
+    }
+
+    #[test]
+    fn build_select_oracle_limit() {
+        let (sql, _) = OracleDialect
+            .build_select("users", &[], &[], Some(5))
+            .unwrap();
+        assert!(sql.contains("FETCH NEXT 5 ROWS ONLY"));
+    }
+
+    #[test]
+    fn build_select_invalid_identifier() {
+        let result = PostgreSqlDialect.build_select("bad;table", &[], &[], None);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn build_select_in() {
+        let (sql, _) = PostgreSqlDialect.build_select_in("users", "id", 3).unwrap();
+        assert_eq!(sql, r#"SELECT * FROM "users" WHERE "id" IN ($1, $2, $3)"#);
+    }
+
+    #[test]
+    fn build_select_in_mysql() {
+        let (sql, _) = MySqlDialect.build_select_in("users", "id", 2).unwrap();
+        assert_eq!(sql, "SELECT * FROM `users` WHERE `id` IN (?, ?)");
+    }
+
+    #[test]
+    fn build_many_to_many_select_in() {
+        let (sql, _) = PostgreSqlDialect
+            .build_many_to_many_select_in("posts", "post_tags", "post_id", "tag_id", 2)
+            .unwrap();
+        assert!(sql.contains(r#"FROM "posts" t"#));
+        assert!(sql.contains(r#"JOIN "post_tags" j"#));
+        assert!(sql.contains(r#"t.id = j."tag_id""#));
+        assert!(sql.contains(r#"j."post_id" IN ("#));
+    }
+
+    #[test]
+    fn build_version_guarded_update() {
+        let pairs = vec![
+            ("title".into(), QueryValue::String("new title".into())),
+        ];
+        let (sql, values) = PostgreSqlDialect
+            .build_version_guarded_update("posts", "id", "42", "_version", 1, 2, &pairs)
+            .unwrap();
+        assert!(sql.contains(r#"UPDATE "posts" SET"#));
+        assert!(sql.contains(r#""title" = $1"#));
+        assert!(sql.contains(r#""_version" = $2"#));
+        assert!(sql.contains(r#""id" = $3"#));
+        assert!(sql.contains(r#""_version" = $4"#));
+        assert_eq!(values.len(), 4);
+    }
+
+    #[test]
+    fn build_version_guarded_update_invalid_table() {
+        let result = PostgreSqlDialect.build_version_guarded_update(
+            "bad table", "id", "42", "_v", 1, 2, &[],
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn resolve_python_type_to_sql_str() {
+        let result = resolve_python_type_to_sql("str", "postgres").unwrap();
+        assert_eq!(result, "TEXT");
+    }
+
+    #[test]
+    fn resolve_python_type_to_sql_int() {
+        assert_eq!(resolve_python_type_to_sql("int", "postgres").unwrap(), "BIGINT");
+        assert_eq!(resolve_python_type_to_sql("int", "mysql").unwrap(), "BIGINT");
+        assert_eq!(resolve_python_type_to_sql("int", "sqlite").unwrap(), "INTEGER");
+        assert_eq!(resolve_python_type_to_sql("int", "mssql").unwrap(), "BIGINT");
+    }
+
+    #[test]
+    fn resolve_python_type_to_sql_float() {
+        assert_eq!(
+            resolve_python_type_to_sql("float", "postgres").unwrap(),
+            "DOUBLE PRECISION"
+        );
+        assert_eq!(resolve_python_type_to_sql("float", "sqlite").unwrap(), "REAL");
+        assert_eq!(resolve_python_type_to_sql("float", "mysql").unwrap(), "DOUBLE");
+    }
+
+    #[test]
+    fn resolve_python_type_to_sql_datetime() {
+        assert_eq!(
+            resolve_python_type_to_sql("datetime", "postgres").unwrap(),
+            "TIMESTAMP WITH TIME ZONE"
+        );
+        assert_eq!(resolve_python_type_to_sql("datetime", "sqlite").unwrap(), "TEXT");
+    }
+
+    #[test]
+    fn resolve_python_type_to_sql_uuid() {
+        assert_eq!(resolve_python_type_to_sql("uuid", "postgres").unwrap(), "UUID");
+        assert_eq!(resolve_python_type_to_sql("UUID", "postgres").unwrap(), "UUID");
+        assert_eq!(resolve_python_type_to_sql("uuid", "sqlite").unwrap(), "TEXT");
+    }
+
+    #[test]
+    fn resolve_python_type_to_sql_optional() {
+        let result = resolve_python_type_to_sql("Optional[str]", "postgres").unwrap();
+        assert_eq!(result, "TEXT");
+
+        let result = resolve_python_type_to_sql("Optional[int]", "sqlite").unwrap();
+        assert_eq!(result, "INTEGER");
+    }
+
+    #[test]
+    fn resolve_python_type_to_sql_unsupported() {
+        let result = resolve_python_type_to_sql("some_custom_type", "postgres");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn prepare_statement_valid() {
+        let mut data = HashMap::new();
+        data.insert("name".into(), QueryValue::String("alice".into()));
+        data.insert("age".into(), QueryValue::Int(30));
+
+        let (columns, values, placeholders) =
+            prepare_statement(&PostgreSqlDialect, &data).unwrap();
+        assert_eq!(columns.len(), 2);
+        assert_eq!(values.len(), 2);
+        assert_eq!(placeholders.len(), 2);
+        assert!(placeholders.iter().all(|p| p.starts_with('$')));
+    }
+
+    #[test]
+    fn prepare_statement_invalid_column() {
+        let mut data = HashMap::new();
+        data.insert("bad column".into(), QueryValue::Int(1));
+        let result = prepare_statement(&PostgreSqlDialect, &data);
+        assert!(result.is_err());
+    }
+}
