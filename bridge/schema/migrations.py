@@ -60,10 +60,10 @@ class MigrationEngine:
                    "name TEXT NOT NULL, "
                    "applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);")
         elif "mssql" in self.dialect:
-            sql = ("IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='_bridge_migrations' AND xtype='U') "
+            sql = ("IF OBJECT_ID('_bridge_migrations', 'U') IS NULL "
                    "CREATE TABLE _bridge_migrations ("
                    "id INT IDENTITY(1,1) PRIMARY KEY, "
-                   "name NVARCHAR(255) NOT NULL, "
+                   "name NVARCHAR(MAX) NOT NULL, "
                    "applied_at DATETIME DEFAULT GETDATE());")
 
         if sql:
