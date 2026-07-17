@@ -1,4 +1,4 @@
-from typing import Any, Dict, Iterable, List, Optional, Type, Union, get_type_hints
+from typing import Any, Dict, Iterable, List, Optional, Type, get_args, get_origin, get_type_hints, Union
 
 import bridge_rs
 
@@ -135,13 +135,14 @@ class BaseModel:
             type_obj = hints.get(field, Any)
 
             # Extract the inner type if it's Optional[...]
-            origin = getattr(type_obj, "__origin__", None)
+            origin = get_origin(type_obj)
             is_optional = False
             if origin is Union:
-                args = getattr(type_obj, "__args__", ())
+                args = get_args(type_obj)
                 if type(None) in args:
                     is_optional = True
-                    type_obj = [a for a in args if a is not type(None)][0]
+                    non_none = [a for a in args if a is not type(None)]
+                    type_obj = non_none[0] if non_none else Any
 
             # Map Python types to canonical names for Rust
             if type_obj is str:
