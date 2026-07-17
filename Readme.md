@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/bridge.png" alt="Bridge Logo" width="250" style="border-radius: 50%;"/>
+<img src="assets/bridge.png" alt="Bridge Logo" width="250" height="250" style="border-radius: 50%; object-fit: cover;"/>
 
 # Bridge
 
@@ -16,6 +16,24 @@
 **Bridge** is a cross-language ORM (Rust+Python). It is lightweight, secure by default.
 
 </div>
+
+---
+
+## Documentation
+
+Full documentation is available in the [docs/](docs/index.md) directory:
+
+- [Quickstart](docs/getting-started/quickstart.md) — install and first query in 5 minutes
+- [Defining models](docs/getting-started/defining-models.md) — fields, types, composite keys
+- [Basic queries](docs/getting-started/basic-queries.md) — CRUD, filtering, serialization
+- [Relationships](docs/getting-started/relationships.md) — HasMany, BelongsToMany, SelfReferential
+- [Query builder reference](docs/manual/queries/query-builder.md) — all clause methods
+- [Transactions and sessions](docs/manual/sessions/transactions.md) — identity map, dirty tracking
+- [Migrations](docs/manual/migrations/creating.md) — snapshot-based schema diffing
+- [Performance](docs/manual/performance/n-plus-one.md) — N+1 queries and eager loading
+- [API reference](docs/api/python/bridge.md) — complete Python API
+- [FAQ](docs/faq.md)
+- [Contributing](docs/contributing.md)
 
 ---
 
